@@ -1,3 +1,10 @@
+main .checkout {
+  max-width: 48rem;
+  margin-inline: auto;
+  padding: 1rem;
+  text-align: left;
+}
+
 main .checkout form {
   display: grid;
   gap: 1rem;

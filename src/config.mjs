@@ -9,6 +9,10 @@ export class CliError extends Error {
 const featureNames = new Set(['cart-checkout', 'pdp']);
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 const routePattern = /^\/[a-zA-Z0-9/_-]*$/;
+export const siteDefaults = Object.freeze({ storeView: 'default', locale: 'en-US' });
+
+const useDefaultIfBlank = (value, fallback) =>
+  value === undefined || (typeof value === 'string' && !value.trim()) ? fallback : value;
 
 export function validateSetup(input) {
   const fields = [];
@@ -71,15 +75,20 @@ export function validateSetup(input) {
   if (!site || typeof site !== 'object' || Array.isArray(site)) {
     fail('site', 'Expected a site object');
   }
-  for (const key of ['storeView', 'locale', 'currency']) {
-    if (typeof site?.[key] !== 'string' || !site[key].trim()) fail(`site.${key}`, 'Required');
+  const storeView = useDefaultIfBlank(site?.storeView, siteDefaults.storeView);
+  const locale = useDefaultIfBlank(site?.locale, siteDefaults.locale);
+  if (typeof storeView !== 'string') {
+    fail('site.storeView', 'Use a cart storage namespace such as default');
+  } else if (!identifier.test(storeView)) {
+    fail('site.storeView', 'Use letters, numbers, hyphens, or underscores');
   }
-  if (typeof site?.storeView === 'string' && !identifier.test(site.storeView)) {
-    fail('site.storeView', 'Use a store view code');
-  }
-  if (typeof site?.locale === 'string' && !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(site.locale)) {
+  if (typeof locale !== 'string') {
+    fail('site.locale', 'Use a shopper locale such as en-US');
+  } else if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale)) {
     fail('site.locale', 'Use a locale such as en-US');
   }
+  if (typeof site?.currency !== 'string' || !site.currency.trim())
+    fail('site.currency', 'Required');
   if (typeof site?.currency === 'string' && !/^[A-Z]{3}$/.test(site.currency)) {
     fail('site.currency', 'Use a three-letter currency code');
   }
@@ -120,23 +129,25 @@ export function validateSetup(input) {
         fail(`api.${key}`, 'Use a nonempty identifier');
       }
     }
-    try {
-      const url = new URL(api?.origin);
-      if (
-        !['https:', 'http:'].includes(url.protocol) ||
-        (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) ||
-        url.pathname !== '/' ||
-        url.search ||
-        url.hash ||
-        url.username ||
-        url.password
-      )
-        throw new Error('invalid origin');
-    } catch {
-      fail(
-        'api.origin',
-        'Provide an HTTPS origin (HTTP only for localhost) without path or credentials',
-      );
+    if (api?.origin !== undefined) {
+      try {
+        const url = new URL(api.origin);
+        if (
+          !['https:', 'http:'].includes(url.protocol) ||
+          (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) ||
+          url.pathname !== '/' ||
+          url.search ||
+          url.hash ||
+          url.username ||
+          url.password
+        )
+          throw new Error('invalid origin');
+      } catch {
+        fail(
+          'api.origin',
+          'Provide an HTTPS origin (HTTP only for localhost) without path or credentials',
+        );
+      }
     }
 
     const routes = input.routes ?? {};
@@ -179,8 +190,8 @@ export function validateSetup(input) {
     version: 1,
     features: [...features].sort(),
     site: {
-      storeView: site.storeView,
-      locale: site.locale,
+      storeView,
+      locale,
       currency: site.currency,
       ...(checkout ? { country: site.country } : {}),
       ...(site.cartDestination ? { cartDestination: site.cartDestination } : {}),
@@ -189,7 +200,11 @@ export function validateSetup(input) {
     productSource: input.productSource,
     ...(checkout
       ? {
-          api: { origin: input.api.origin, org: input.api.org, site: input.api.site },
+          api: {
+            ...(input.api.origin === undefined ? {} : { origin: input.api.origin }),
+            org: input.api.org,
+            site: input.api.site,
+          },
           routes: Object.fromEntries(
             ['cart', 'checkout', 'review', 'complete', 'cancel'].map((key) => [
               key,

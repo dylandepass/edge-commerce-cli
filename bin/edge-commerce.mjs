@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
-import { CliError, validateSetup } from '../src/config.mjs';
+import { CliError, siteDefaults, validateSetup } from '../src/config.mjs';
 import {
   applyPlan,
   applyRemoval,
@@ -39,8 +39,8 @@ async function wizard(setup, interactive) {
   if (!interactive) return setup;
 
   const prompts = await import('@clack/prompts');
-  const ask = async (message, initialValue) => {
-    const answer = await prompts.text({ message, initialValue });
+  const ask = async (message, initialValue, defaultValue) => {
+    const answer = await prompts.text({ message, initialValue, defaultValue });
     if (prompts.isCancel(answer)) throw new CliError('CANCELLED', 'Setup cancelled.');
     return answer;
   };
@@ -63,12 +63,12 @@ async function wizard(setup, interactive) {
   setup.version ??= 1;
   setup.site ??= {};
 
-  for (const [key, label] of [
-    ['storeView', 'Store view code'],
-    ['locale', 'Locale (e.g. en-US)'],
+  for (const [key, label, fallback] of [
+    ['storeView', 'Cart storage namespace (default: default)', siteDefaults.storeView],
+    ['locale', 'Shopper locale (default: en-US; change for other markets)', siteDefaults.locale],
     ['currency', 'Currency (e.g. USD)'],
   ]) {
-    setup.site[key] ??= await ask(label);
+    setup.site[key] ??= await ask(label, fallback, fallback);
   }
 
   setup.productSource ??= await ask(
@@ -92,10 +92,13 @@ async function wizard(setup, interactive) {
 
   if (setup.features.includes('cart-checkout')) {
     setup.site.country ??= await ask('Checkout country (e.g. US)');
+    prompts.note(
+      'AEM preview/live and localhost use the staging Commerce API; custom domains use production. To override, provide a public api.origin in setup JSON.',
+      'API routing',
+    );
     setup.api ??= {};
 
     for (const [key, label] of [
-      ['origin', 'Commerce API origin (HTTPS)'],
       ['org', 'Commerce API org'],
       ['site', 'Commerce API site'],
     ]) {
@@ -203,7 +206,7 @@ program
   .version(JSON.parse(await readFile(new URL('../package.json', import.meta.url))).version)
   .addHelpText(
     'after',
-    '\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n',
+    '\nDefaults: cart storage namespace default; shopper locale en-US (US English).\nAPI routing: *.aem.page, *.aem.live, and localhost use staging; custom domains use production.\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n',
   );
 program
   .command('init')

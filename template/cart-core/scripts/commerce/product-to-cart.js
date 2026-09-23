@@ -1,9 +1,13 @@
 import { getCart } from './cart.js';
+import site from './site-config.js';
 
 /** The storefront supplies a resolved catalog product/variant; price remains server-authoritative. */
 export function productToCartItem(product, quantity = 1) {
   if (!product?.sku || !product.path || !product.name || product.price?.final == null) {
     throw new Error('A source-backed SKU, path, name and offer are required');
+  }
+  if (product.price.currency !== site.currency) {
+    throw new Error(`This cart only supports ${site.currency} offers`);
   }
   return {
     sku: product.sku,

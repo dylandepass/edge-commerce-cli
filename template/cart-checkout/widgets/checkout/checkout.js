@@ -106,12 +106,13 @@ function readOrderInput(form, method) {
   };
 }
 
-export default function decorate(block) {
+export default function decorate(widget) {
+  const content = widget.querySelector('.commerce-checkout-content');
   const cart = getCart();
   if (!cart.count) {
     const empty = document.createElement('p');
     empty.textContent = 'Your cart is empty.';
-    block.replaceChildren(empty);
+    content.replaceChildren(empty);
     return;
   }
 
@@ -120,7 +121,7 @@ export default function decorate(block) {
   const flow = createCheckoutFlow();
 
   restoreDraft(form, draftKey);
-  block.replaceChildren(form);
+  content.replaceChildren(form);
 
   const fail = () => {
     message.textContent = 'Unable to continue. Check the address and try again.';

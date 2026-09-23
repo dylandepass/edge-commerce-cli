@@ -16,7 +16,9 @@ const required = [
   'src/config.mjs',
   'src/install.mjs',
   'template/cart-core/scripts/commerce/cart.js',
-  'template/cart-checkout/blocks/checkout/checkout.js',
+  'template/cart-core/scripts/commerce/jsonld-adapter.js',
+  'template/cart-checkout/widgets/cart/cart.html',
+  'template/cart-checkout/widgets/checkout/checkout.js',
   'template/pdp/blocks/pdp/pdp.js',
 ];
 const allowed = (file) =>
@@ -36,6 +38,11 @@ try {
 
   assert.equal(packed.name, pkg.name);
   assert.equal(packed.version, pkg.version);
+  for (const name of ['cart', 'checkout', 'order-review', 'order-complete', 'order-cancel']) {
+    for (const extension of ['html', 'css', 'js']) {
+      required.push(`template/cart-checkout/widgets/${name}/${name}.${extension}`);
+    }
+  }
   for (const file of required) {
     assert.ok(files.has(file), `Missing published file: ${file}`);
   }
@@ -85,8 +92,8 @@ try {
     ),
   );
   assert.equal(plan.outcome, 'ready');
-  assert.ok(plan.operations.some((file) => file.path === 'blocks/checkout/checkout.js'));
-  assert.ok(!existsSync(path.join(storefront, 'blocks/checkout/checkout.js')));
+  assert.ok(plan.operations.some((file) => file.path === 'widgets/checkout/checkout.js'));
+  assert.ok(!existsSync(path.join(storefront, 'widgets/checkout/checkout.js')));
 
   console.log(`Verified ${packed.name}@${packed.version} (${files.size} packaged files)`);
 } finally {

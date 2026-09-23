@@ -36,13 +36,14 @@ function createOrderDetails(order) {
   return [heading, items, total, address];
 }
 
-export default async function decorate(block) {
+export default async function decorate(widget) {
+  const content = widget.querySelector('.commerce-review-content');
   const id = new URLSearchParams(window.location.search).get('orderId');
   const flow = createReviewFlow();
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   status.textContent = 'Loading order for review…';
-  block.replaceChildren(status);
+  content.replaceChildren(status);
 
   try {
     const order = await flow.lookup(id);
@@ -60,7 +61,7 @@ export default async function decorate(block) {
     cancel.textContent = 'Cancel and return to cart';
 
     status.textContent = 'PayPal approved. Payment is not complete until you confirm.';
-    block.replaceChildren(...createOrderDetails(order), status, confirm, cancel);
+    content.replaceChildren(...createOrderDetails(order), status, confirm, cancel);
 
     const busy = (value) => {
       confirm.disabled = value;

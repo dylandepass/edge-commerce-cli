@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -35,11 +35,18 @@ async function installed() {
           complete: '/complete',
           cancel: '/cancel',
         },
-        paypal: { clientId: 'public-id' },
+        paypal: { clientId: 'none' },
       }),
     }),
   );
-  return (relative) => import(pathToFileURL(path.join(target, relative)).href);
+  const load = (relative) => import(pathToFileURL(path.join(target, relative)).href);
+  load.widget = async (name) => {
+    const widget = document.createElement('div');
+    widget.className = name;
+    widget.innerHTML = await readFile(path.join(target, `widgets/${name}/${name}.html`), 'utf8');
+    return widget;
+  };
+  return load;
 }
 function browser(url = 'https://store.example.com/products/example') {
   const dom = new JSDOM('<main><div class="pdp"><div><div>PDP</div></div></div></main>', { url });
@@ -135,14 +142,14 @@ test('checkout restores tab-scoped form without declaring payment success', asyn
     'edge-commerce:checkout-form:v1:en',
     JSON.stringify({ firstName: 'Sam', email: 'sam@example.com' }),
   );
-  const block = document.createElement('div');
-  const { default: decorate } = await load('blocks/checkout/checkout.js');
-  decorate(block);
-  assert.equal(block.querySelector('[name="firstName"]').value, 'Sam');
-  assert.equal(block.querySelector('[name="email"]').value, 'sam@example.com');
-  assert.equal(block.querySelector('select').disabled, true);
+  const widget = await load.widget('checkout');
+  const { default: decorate } = await load('widgets/checkout/checkout.js');
+  decorate(widget);
+  assert.equal(widget.querySelector('[name="firstName"]').value, 'Sam');
+  assert.equal(widget.querySelector('[name="email"]').value, 'sam@example.com');
+  assert.equal(widget.querySelector('select').disabled, true);
   assert.equal(
-    [...block.querySelectorAll('button')].find(
+    [...widget.querySelectorAll('button')].find(
       (button) => button.textContent === 'Continue to PayPal',
     ).disabled,
     true,
@@ -168,15 +175,15 @@ test('complete page requires verified payment and only then clears cart', async 
   );
   let state = 'payment_pending';
   globalThis.fetch = async () => response({ order: { id: 'one', state } });
-  const block = document.createElement('div');
-  const { default: decorate } = await load('blocks/order-complete/order-complete.js');
-  await decorate(block);
+  const widget = await load.widget('order-complete');
+  const { default: decorate } = await load('widgets/order-complete/order-complete.js');
+  await decorate(widget);
   assert.equal(cart.count, 1);
-  assert(!block.textContent.includes('Thank you'));
+  assert(!widget.textContent.includes('Thank you'));
   state = 'payment_completed';
-  await decorate(block);
+  await decorate(widget);
   assert.equal(cart.count, 0);
-  assert.match(block.textContent, /Thank you/);
+  assert.match(widget.textContent, /Thank you/);
   cart.add({
     sku: 'another',
     path: '/another',
@@ -184,7 +191,7 @@ test('complete page requires verified payment and only then clears cart', async 
     quantity: 1,
     price: { final: '5', currency: 'USD' },
   });
-  await decorate(block);
+  await decorate(widget);
   assert.equal(
     cart.count,
     1,
@@ -196,14 +203,53 @@ test('complete page requires verified payment and only then clears cart', async 
 test('cancel page distinguishes buyer cancellation without echoing internal reasons', async () => {
   const dom = browser('https://store.example.com/cancel?reason=customer_cancelled');
   const load = await installed();
-  const { default: decorate } = await load('blocks/order-cancel/order-cancel.js');
-  const block = document.createElement('div');
-  decorate(block);
-  assert.match(block.textContent, /You cancelled/);
+  const { default: decorate } = await load('widgets/order-cancel/order-cancel.js');
+  const widget = await load.widget('order-cancel');
+  decorate(widget);
+  assert.match(widget.textContent, /You cancelled/);
   dom.window.history.replaceState({}, '', '/cancel?reason=INTERNAL_PROVIDER_ERROR');
-  decorate(block);
-  assert(!block.textContent.includes('INTERNAL_PROVIDER_ERROR'));
-  assert.match(block.textContent, /could not be completed/);
+  decorate(widget);
+  assert(!widget.textContent.includes('INTERNAL_PROVIDER_ERROR'));
+  assert.match(widget.textContent, /could not be completed/);
+  dom.window.close();
+});
+
+test('widget links match the copied self-contained page shells', async () => {
+  const html = await readFile(
+    new URL('./fixtures/pages/commerce.plain.html', import.meta.url),
+    'utf8',
+  );
+  const page = new JSDOM(html);
+  globalThis.document = page.window.document;
+  const links = [...page.window.document.querySelectorAll('a[href*="/widgets/"]')];
+  assert.deepEqual(
+    links.map((link) => new URL(link.href).pathname),
+    [
+      '/widgets/cart/cart.html',
+      '/widgets/checkout/checkout.html',
+      '/widgets/order-review/order-review.html',
+      '/widgets/order-complete/order-complete.html',
+      '/widgets/order-cancel/order-cancel.html',
+    ],
+  );
+  const load = await installed();
+  for (const link of links) {
+    const name = link.href.split('/').at(-2);
+    const widget = await load.widget(name);
+    assert.equal(widget.querySelectorAll('h1').length, 1);
+  }
+  page.window.close();
+});
+
+test('review widget retains its heading and never shows a confirmation without order proof', async () => {
+  const dom = browser('https://store.example.com/review?orderId=unknown');
+  const load = await installed();
+  const widget = await load.widget('order-review');
+  const { default: decorate } = await load('widgets/order-review/order-review.js');
+  await decorate(widget);
+  assert.match(widget.querySelector('h1').textContent, /Order review/);
+  assert.match(widget.textContent, /Order lookup failed/);
+  assert.equal(widget.querySelectorAll('button').length, 0);
   dom.window.close();
 });
 
@@ -218,6 +264,8 @@ test('cart UI updates the intended variant line, and API URL is scoped to org/si
     name: 'Red',
     quantity: 1,
     price: { final: '10', currency: 'USD' },
+    imageUrl: 'https://media.example.com/red.webp',
+    productUrl: 'https://store.example.com/p?variant=red',
     selectedOptions: [{ id: 'color', value: 'red' }],
   });
   cart.add({
@@ -226,15 +274,41 @@ test('cart UI updates the intended variant line, and API URL is scoped to org/si
     name: 'Blue',
     quantity: 1,
     price: { final: '10', currency: 'USD' },
+    productUrl: 'javascript:alert(1)',
+    imageUrl: 'data:image/svg+xml,not-safe',
     selectedOptions: [{ id: 'color', value: 'blue' }],
   });
-  const block = document.createElement('div');
-  const { default: decorate } = await load('blocks/cart/cart.js');
-  decorate(block);
-  assert.equal(block.querySelectorAll('.cart-line').length, 2);
-  block.querySelectorAll('.cart-line button')[1].click();
+  const widget = await load.widget('cart');
+  const { default: decorate } = await load('widgets/cart/cart.js');
+  decorate(widget);
+  assert.equal(widget.querySelectorAll('.cart-line').length, 2);
+  assert.equal(widget.querySelectorAll('.cart-line-total').length, 2);
+  assert.match(widget.querySelector('.cart-line-total').textContent, /\$10/);
+  const links = [...widget.querySelectorAll('.cart-line-product a')];
+  assert.equal(links[0].href, 'https://store.example.com/p?variant=red');
+  assert.equal(links[1].href, 'https://store.example.com/p');
+  assert.equal(widget.querySelectorAll('.cart-line-product img').length, 1);
+  assert.equal(widget.querySelector('.cart-line-product img').alt, '');
+  assert.equal(widget.querySelectorAll('.commerce-cart-summary').length, 1);
+  assert.equal(widget.querySelectorAll('.commerce-cart-summary a').length, 1);
+  assert(!widget.textContent.includes('PayPal is unavailable'));
+  widget.querySelectorAll('.cart-line button')[1].click();
   assert.equal(cart.items.length, 1);
   assert.equal(cart.items[0].selectedOptions[0].value, 'red');
+  assert.equal(widget.querySelectorAll('.cart-line').length, 1);
+  assert.match(widget.querySelector('.commerce-cart-summary').textContent, /Subtotal: \$10/);
+  widget.querySelector('.cart-line button').click();
+  assert.equal(widget.querySelectorAll('.cart-line').length, 0);
+  assert.equal(widget.querySelector('.commerce-cart-summary').hidden, true);
+  assert.match(widget.textContent, /Your cart is empty/);
+  cart.add({
+    sku: 'p',
+    path: '/p',
+    name: 'Red',
+    quantity: 1,
+    price: { final: '10', currency: 'USD' },
+    selectedOptions: [{ id: 'color', value: 'red' }],
+  });
   const { createApi } = await load('scripts/commerce/api.js');
   let called;
   const api = createApi({

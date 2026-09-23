@@ -1,0 +1,111 @@
+main .cart {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding: 1rem;
+  text-align: left;
+}
+
+main .cart h1 {
+  margin-bottom: 1.5rem;
+}
+
+main .cart .commerce-cart-layout {
+  display: grid;
+  gap: 1.5rem;
+}
+
+main .cart .cart-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--commerce-border, #ccc);
+}
+
+main .cart .cart-line-product {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+main .cart .cart-line-product img {
+  width: 4rem;
+  height: 4rem;
+  flex: none;
+  object-fit: cover;
+}
+
+main .cart .cart-line-product a {
+  overflow-wrap: anywhere;
+}
+
+main .cart .cart-line-total {
+  text-align: right;
+}
+
+main .cart .cart-line input {
+  width: 5rem;
+}
+
+main .cart .cart-line input,
+main .cart .cart-line button {
+  box-sizing: border-box;
+  min-height: 44px;
+  font: inherit;
+}
+
+main .cart .cart-line button {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+main .cart .commerce-cart-summary:not([hidden]) {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--commerce-border, #ccc);
+}
+
+main .cart .commerce-cart-summary > * {
+  margin: 0;
+}
+
+main .cart .cart-checkout-link,
+main .cart .commerce-cart-summary button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+}
+
+main .cart .cart-checkout-link {
+  background: var(--commerce-action-background, #222);
+  color: var(--commerce-action-color, #fff);
+}
+
+main .cart :focus-visible {
+  outline: 2px solid var(--commerce-focus, currentcolor);
+  outline-offset: 2px;
+}
+
+@media (width >= 900px) {
+  main .cart .commerce-cart-layout:has(.commerce-cart-summary:not([hidden])) {
+    grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+  }
+
+  main .cart .cart-line {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+
+  main .cart .cart-line-product {
+    grid-column: auto;
+  }
+}

@@ -1,6 +1,6 @@
 # Edge Commerce CLI
 
-Copies customer-owned EDS cart/checkout and optional PDP source into an existing storefront. Node 20+ runs the installer; copied browser modules use no npm runtime dependency. This is an initial sandbox-oriented starter. PayPal v6 compatibility, country/address coverage, and server setup need merchant validation before production use.
+Copies customer-owned EDS cart/checkout widgets and optional PDP block source into an existing storefront. Node 20+ runs the installer; copied browser modules use no npm runtime dependency. This is an initial sandbox-oriented starter. PayPal v6 compatibility, country/address coverage, and server setup need merchant validation before production use.
 
 ## Local use
 
@@ -14,7 +14,11 @@ node bin/edge-commerce.mjs upgrade --target /path/to/eds-storefront --config exa
 node bin/edge-commerce.mjs remove --feature cart-checkout --target /path/to/eds-storefront --no-input --dry-run --json
 ```
 
-Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--feature pdp` installs the PDP plus cart core without checkout. Repeat `--feature` for both (and list both in your config). `upgrade` shows per-file diffs and requires `--yes` to apply only when installed files still match their recorded hashes. `remove` removes unchanged files for the chosen profile; edited files stay with the customer. Conflicts block the entire install, including generated configuration. No `postinstall` mutates the storefront. See copied `docs/commerce/setup.md` for authored page and integration steps. The CLI never accepts PayPal server secrets.
+Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--feature pdp` installs the PDP plus cart core without checkout. Repeat `--feature` for both (and list both in your config). `upgrade` shows per-file diffs and requires `--yes` to apply only when installed files still match their recorded hashes. `remove` removes unchanged files for the chosen profile; edited files stay with the customer. Conflicts block the entire install, including generated configuration. No `postinstall` mutates the storefront. See copied `docs/commerce/checkout-setup.md` for widget links, page authoring, and integration steps. The storefront must support AEM widget links; the CLI does not modify its page loader or publish pages. The CLI never accepts PayPal server secrets.
+
+Cart lines require an explicit price currency matching the configured checkout currency; other-currency and currency-less offers are rejected rather than relabeled. Existing PDPs backed by Product/Offer JSON-LD can opt into the copied `scripts/commerce/jsonld-adapter.js` to map a selected Offer without copying heavy product metadata. See copied `docs/commerce/setup.md` for usage.
+
+The cart storage namespace (`site.storeView`) defaults to `default`; it is not a required Commerce API store view. The shopper locale (`site.locale`) defaults to `en-US` for US English. The wizard shows both defaults; change the locale for other markets. JSON setup may omit these fields or leave them blank, but currency and checkout country still need values. For checkout, the API origin is selected in the browser: `*.aem.page`, `*.aem.live`, and localhost use `https://api-stage.adobecommerce.live`; custom domains use `https://api.adobecommerce.live`. Provide `api.org` and `api.site`; set a public `api.origin` in JSON only when a custom staging domain or proxy needs an override. PayPal sandbox/live settings are separate from API routing.
 
 `npm run format` formats JS and CSS; `npm run lint` checks syntax and Prettier formatting. `npm test` runs unit and fixture tests; `npm run verify:package` checks and installs the npm tarball in a disposable directory. No live checkout or browser acceptance tests are included yet.
 

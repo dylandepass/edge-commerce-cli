@@ -1,12 +1,13 @@
 import { createReviewFlow } from '../../scripts/commerce/review-flow.js';
 import site from '../../scripts/commerce/site-config.js';
 
-export default async function decorate(block) {
+export default async function decorate(widget) {
+  const content = widget.querySelector('.commerce-complete-content');
   const id = new URLSearchParams(window.location.search).get('orderId');
   const status = document.createElement('p');
   status.setAttribute('role', 'status');
   status.textContent = 'Checking payment status…';
-  block.replaceChildren(status);
+  content.replaceChildren(status);
   try {
     const flow = createReviewFlow();
     const { order, state } = await flow.completion(id);
@@ -26,7 +27,7 @@ export default async function decorate(block) {
     const title = document.createElement('h2');
     title.textContent = 'Thank you for your order';
     status.textContent = `Order ${order.id} is complete.`;
-    block.replaceChildren(title, status);
+    content.replaceChildren(title, status);
   } catch {
     status.textContent =
       'Could not verify the payment. Please try again later; do not place another order yet.';
