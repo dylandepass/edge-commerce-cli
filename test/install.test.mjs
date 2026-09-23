@@ -74,6 +74,32 @@ test('validation rejects missing, unsafe, unknown and secret inputs without copy
   assert.deepEqual(pdp.features, ['pdp']);
 });
 
+test('cart destinations stay on the storefront for checkout and PDP-only setups', () => {
+  const pdp = {
+    features: ['pdp'],
+    site: { storeView: 'en', locale: 'en-US', currency: 'USD' },
+    productSource: 'starter-pdp',
+    api: undefined,
+    routes: undefined,
+    paypal: undefined,
+  };
+
+  for (const setup of [base, pdp]) {
+    for (const cartDestination of ['//other', '///other', null]) {
+      assert.throws(
+        () => valid({ ...setup, site: { ...setup.site, cartDestination } }),
+        (error) =>
+          error.code === 'INVALID_INPUT' &&
+          error.fields.some((field) => field.path === 'site.cartDestination'),
+      );
+    }
+    assert.equal(
+      valid({ ...setup, site: { ...setup.site, cartDestination: '/cart' } }).site.cartDestination,
+      '/cart',
+    );
+  }
+});
+
 test('profiles install in either order without rewriting the core or adding checkout for PDP alone', async () => {
   const { templates, target } = await fixture();
   const pdp = valid({
