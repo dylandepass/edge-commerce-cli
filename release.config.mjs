@@ -1,0 +1,9 @@
+export default {
+  branches: [{ name: 'main', channel: 'preview' }],
+  tagFormat: 'v${version}',
+  plugins: [
+    '@semantic-release/commit-analyzer',
+    '@semantic-release/release-notes-generator',
+    '@semantic-release/npm',
+  ],
+};

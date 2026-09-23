@@ -20,7 +20,7 @@ Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--fe
 
 ## Distribution
 
-After the npm bootstrap and a successful tag-driven release, customers can run a pinned preview version without a storefront runtime dependency:
+The published `0.1.0` preview can be run without a storefront runtime dependency:
 
 ```sh
 cd /path/to/eds-storefront
@@ -28,4 +28,4 @@ npx --yes edge-commerce-cli@0.1.0 init --dry-run
 npx --yes edge-commerce-cli@0.1.0 init
 ```
 
-The current package is **not published**; the commands above are examples for a future preview release, not an instruction to use it for production checkout. A push to `main` runs CI but does not publish. See [the release procedure](docs/releasing.md) for one-time npm setup, preview tag releases, and sandbox requirements.
+This is not production-validated checkout code. npm currently points `latest` at the bootstrap version, so always specify a version or `@preview`; do not use an unversioned install. Reviewed `fix:` and `feat:` commits merged to `main` can trigger automatic preview releases after validation; docs-only and `chore:` commits normally do not. See [the release procedure](docs/releasing.md) for the release rules and sandbox requirements.

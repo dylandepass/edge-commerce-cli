@@ -21,10 +21,11 @@
   },
   "scripts": {
     "lint": "node scripts/lint.mjs && npm run format:check",
-    "format": "prettier --write 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json prettier.config.cjs",
-    "format:check": "prettier --check 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json prettier.config.cjs",
+    "format": "prettier --write 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json release.config.mjs prettier.config.cjs",
+    "format:check": "prettier --check 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json release.config.mjs prettier.config.cjs",
     "test": "node --test test/*.test.mjs",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "release": "semantic-release"
   },
   "engines": {
     "node": ">=20.12.0"
@@ -45,6 +46,7 @@
   },
   "devDependencies": {
     "jsdom": "^26.1.0",
-    "prettier": "^3.9.9"
+    "prettier": "^3.9.9",
+    "semantic-release": "^25.0.9"
   }
 }

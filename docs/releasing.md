@@ -1,39 +1,32 @@
 # Releasing Edge Commerce CLI
 
-The repository has two workflows:
+`main` is the release branch. `.github/workflows/ci.yml` validates pushes and pull requests. After a push to `main`, `.github/workflows/release.yml` validates the same source, runs a semantic-release dry run, and then publishes **only if qualifying commits exist** since the last version tag. Semantic-release calculates the version, creates the `v<version>` tag, and publishes to npm's `preview` dist-tag. The workflow then verifies the npm version is visible and creates a GitHub **prerelease**. Tag pushes alone do not trigger a release workflow.
 
-- `.github/workflows/ci.yml` tests pushes to `main` and pull requests.
-- `.github/workflows/release.yml` validates a pushed `v<package-version>` tag, publishes to **npm's `preview` dist-tag**, then creates a GitHub **prerelease**. A branch push alone never publishes anything. The release job uses npm trusted publishing (OIDC), not an `NPM_TOKEN` repository secret. A failed publish does not create a GitHub release.
+This starter has unit and fixture tests but has **not** passed merchant PayPal sandbox validation. Never promote an unvalidated version to npm's `latest` or describe it as production-ready solely because CI passed. Use a pinned version such as `npx --yes edge-commerce-cli@0.1.0 --version`, or explicitly request `@preview`.
 
-This starter has unit and fixture tests but has **not** passed merchant PayPal sandbox validation. Do not promote a version to npm's `latest` or describe it as production-ready solely because CI passed. The workflow intentionally publishes preview versions only, including tags without a prerelease suffix. Customers can run a specific tested version with `npx --yes edge-commerce-cli@0.1.0 init --dry-run` after it is published.
+## One-time setup (already completed)
 
-## One-time npm bootstrap
+The initial `0.0.0-bootstrap.0` package was published manually, enabling npm trusted publishing. npm also assigned the bootstrap version the **`latest`** dist-tag on that first publication, despite `--tag bootstrap`. The first GitHub prerelease and npm preview, `v0.1.0`, were published from the tagged commit. Do not repeat the bootstrap or reuse the `v0.1.0` tag: published npm versions are immutable. Unversioned `npm install edge-commerce-cli` and `npx edge-commerce-cli` currently resolve to the bootstrap version.
 
-npm requires a package to exist before you can configure its trusted publisher. This step is **manual**, performed by an npm account authorized to own `edge-commerce-cli`; do not run it from the main checkout and do not push the bootstrap version or create a tag for it.
+The npm trusted publisher is configured for GitHub owner `dylandepass`, repository `edge-commerce-cli`, workflow filename `release.yml`, environment `npm-release`, with `npm publish` allowed. The workflow retains that filename and environment. GitHub's built-in token creates Git tags and prereleases, and npm uses short-lived OpenID Connect (OIDC) credentials; no `NPM_TOKEN` GitHub secret is needed. Protect `main` so only reviewed changes can initiate a release. Optional required reviewers on the `npm-release` environment can add an approval gate.
 
-1. Commit and push the source, verify the GitHub repository is public, and verify ownership/availability of the npm name. A registry 404 is a hint, not a reservation.
-2. In a **disposable clone** of the source, run `npm ci`, `npm run lint`, and `npm test`. Sign in with `npm login` on your own machine.
-3. In that disposable clone, run `npm pkg set version=0.0.0-bootstrap.0`, then `npm run verify:package` and `npm publish --access public --tag bootstrap`. This publishes working starter code under a bootstrap-only version without changing the main checkout's `0.1.0` version or assigning the `latest` dist-tag. If the name is already owned, choose another package name and update the repository metadata, workflows, examples, and npm settings before proceeding.
-4. On npmjs.com, open the `edge-commerce-cli` package's **Trusted Publisher** settings. Select GitHub Actions, owner `dylandepass`, repository `edge-commerce-cli`, workflow filename `release.yml`, environment name `npm-release`, and allow `npm publish`. Match the casing and filename exactly. The package must already exist. Do not place an npm write token in GitHub secrets.
-5. On GitHub, create the `npm-release` environment. Consider requiring approval and protect `v*` tags so only maintainers can initiate a publish. The workflow's environment name must match the npm trusted publisher setting. Ensure Actions has permission to create releases (repository Actions workflow setting or repository policy).
+## Subsequent preview releases
 
-The first **tag-driven** release can then be `v0.1.0`: the bootstrap version is separate, so CI publishes a version that does not yet exist on npm. Never reuse a version that was already published—npm package versions are immutable.
+1. Write or merge commits with [Conventional Commit](https://www.conventionalcommits.org/) messages. For squash merges, use a conventional PR title. For example, `fix: handle an empty cart` releases a patch; `feat: add a cart option` releases a minor; a `BREAKING CHANGE:` footer releases a major. Docs-only and `chore:` commits normally do not release. A breaking change can increment the major version even before production readiness, but publishing still stays on `preview`.
+2. Review the diff and let CI pass. Merging to `main` triggers the release workflow, which runs lint, tests, a packaged-CLI smoke test, and a semantic-release **dry run** before any real publication. If the `npm-release` environment requires reviewers, the publication job waits for approval.
+3. Confirm the resulting npm version is tagged `preview` and the GitHub release is marked **prerelease**. Test the exact published version with `npx --yes edge-commerce-cli@<version> --version` and a dry-run against a disposable EDS storefront. A passing workflow is not a substitute for PayPal sandbox validation.
 
-## Each preview release
+**Do not manually bump the checked-in `package.json` or `package-lock.json` for each release, create a release tag, or use `npm publish` locally.** Semantic-release reads the existing `v0.1.0` tag, computes the new version, and updates the package metadata in the workflow checkout for publication. The repository's checked-in version is a baseline and may lag published versions. For local release tooling, use Node 22.14+ or 24.10+; the workflow pins Node 24.21.0. Customers running the installed CLI can still use Node 20.12+.
 
-1. Update `package.json` and `package-lock.json` to the same **new** version (for example `npm version patch --no-git-tag-version`), unless the prepared version already matches. Do not run `npm version`'s automatic commit/tag flow; review and commit the actual changes separately.
-2. Review the diff. Run `npm ci`, `npm run lint`, `npm test`, and `npm run verify:package`. Check that the tarball contains `bin/`, `src/`, `template/`, `examples/`, `README.md`, and `LICENSE`, not `.env` files or tests. Obtain sandbox sign-off before making customer-facing claims.
-3. After the version change is committed and pushed to the intended branch, create an annotated tag `v<package.json version>` **at that commit**, and push the tag. The tag push runs release validation and, if the GitHub environment requires it, waits for approval. No CLI invocation on a customer storefront happens as part of the release workflow.
-4. Confirm the workflow published the exact npm version with the `preview` dist-tag and created a GitHub prerelease. Test the published package explicitly: `npx --yes edge-commerce-cli@<version> --version` and a dry-run against a disposable EDS storefront.
-
-The tag must match `package.json` exactly. Failed validation or npm publication leaves no new GitHub release. If only the **GitHub release** job fails after npm succeeds, rerun just the failed job; do not rerun the publish job, because npm will refuse to republish the same version. Keep the old version and tag immutable; fix a broken npm publication by releasing a new version.
+If the npm publish succeeds but GitHub release creation fails, rerun the failed release job. It checks for the tagged version on npm before creating the prerelease. If publishing fails **after a Git tag is created**, stop and diagnose the partial release; do not reuse or move a published version or tag blindly.
 
 ## Production promotion
 
-Only after the payment journeys, server return/review URLs, merchant setup, and supported geographies have been validated in a real sandbox should maintainers choose a public production release policy. This preview workflow never assigns `latest` automatically. Promoting an audited version requires a separate, deliberate change to npm's dist-tags and release documentation; that action is not part of this setup.
+The workflow never assigns npm's `latest`, and GitHub prereleases are explicitly not marked Latest. The bootstrap version still owns npm's `latest` tag. Changing this requires a separate deliberate decision after merchant sandbox validation, including an update to npm's dist-tag and customer-facing installation guidance. It is **not** part of an automatic merge release.
 
 ## Sources
 
-- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/): required Node/npm versions, npm package settings, GitHub environment matching, and OIDC provenance.
-- [npm provenance](https://docs.npmjs.com/generating-provenance-statements/): public source and registry requirements.
-- [npm dist-tags](https://docs.npmjs.com/adding-dist-tags-to-packages/): preview versus `latest` distribution.
+- [semantic-release configuration](https://semantic-release.org/usage/configuration/): existing tags, commit analysis, branches, and channels.
+- [semantic-release GitHub Actions recipe](https://semantic-release.org/recipes/ci-configurations/github-actions/): OIDC authentication and full tag history.
+- [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/): trusted-publisher filename and environment matching.
+- [npm dist-tags](https://docs.npmjs.com/adding-dist-tags-to-packages/): `preview` versus `latest` distribution.
