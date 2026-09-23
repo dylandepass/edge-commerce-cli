@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "features": ["pdp"],
+  "site": {
+    "storeView": "en", "locale": "en-US", "currency": "USD",
+    "cartBehavior": "stay"
+  },
+  "productSource": "starter-pdp"
+}

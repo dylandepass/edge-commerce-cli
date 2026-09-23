@@ -1,0 +1,70 @@
+name: Publish preview release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: npm-preview-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Match the tag to the package version
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+            const tag = process.env.GITHUB_REF_NAME;
+            if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag)
+                || tag !== `v${pkg.version}` || pkg.private === true) {
+              console.error(`Expected a publishable package at ${tag}, got ${pkg.version}`);
+              process.exitCode = 1;
+            }
+          '
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run verify:package
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - run: npm ci
+      - name: Use an npm CLI that supports trusted publishing
+        run: npm install --global npm@11
+      - name: Publish as preview using npm trusted publishing
+        run: npm publish --access public --tag preview
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub prerelease after npm succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --prerelease

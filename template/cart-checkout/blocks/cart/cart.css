@@ -1,0 +1,19 @@
+main .cart .cart-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--commerce-border, #ccc);
+}
+main .cart .cart-line span {
+  flex: 1;
+}
+main .cart .cart-line input {
+  width: 5rem;
+}
+main .cart button:focus-visible,
+main .cart input:focus-visible {
+  outline: 2px solid var(--commerce-focus, currentcolor);
+  outline-offset: 2px;
+}

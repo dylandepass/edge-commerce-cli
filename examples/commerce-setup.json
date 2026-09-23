@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "features": ["cart-checkout"],
+  "site": { "storeView": "en", "locale": "en-US", "currency": "USD", "country": "US" },
+  "productSource": "existing-pdp",
+  "api": { "origin": "https://api-stage.adobecommerce.live", "org": "your-org", "site": "your-site" },
+  "routes": {
+    "cart": "/cart", "checkout": "/checkout", "review": "/order/review",
+    "complete": "/order/complete", "cancel": "/order/cancel"
+  },
+  "paypal": { "clientId": "your-public-sandbox-client-id", "environment": "sandbox" }
+}

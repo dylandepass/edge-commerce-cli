@@ -1,0 +1,6 @@
+/* Optional storefront overrides for the installed commerce blocks. Load in your EDS site's global styles. */
+:root {
+  --commerce-border: #ccc;
+  --commerce-focus: currentcolor;
+  --commerce-space: 1rem;
+}

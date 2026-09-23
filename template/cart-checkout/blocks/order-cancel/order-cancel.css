@@ -1,0 +1,8 @@
+main .order-cancel {
+  max-width: 42rem;
+  padding-block: 2rem;
+}
+main .order-cancel a:focus-visible {
+  outline: 2px solid var(--commerce-focus, currentcolor);
+  outline-offset: 2px;
+}

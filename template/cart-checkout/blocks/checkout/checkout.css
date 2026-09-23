@@ -1,0 +1,19 @@
+main .checkout form {
+  display: grid;
+  gap: 1rem;
+  max-width: 42rem;
+}
+main .checkout label {
+  display: grid;
+  gap: 0.35rem;
+}
+main .checkout input,
+main .checkout select,
+main .checkout button {
+  padding: 0.75rem;
+  font: inherit;
+}
+main .checkout :focus-visible {
+  outline: 2px solid var(--commerce-focus, currentcolor);
+  outline-offset: 2px;
+}

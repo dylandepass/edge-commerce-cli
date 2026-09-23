@@ -1,0 +1,50 @@
+{
+  "name": "edge-commerce-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dylandepass/edge-commerce-cli.git"
+  },
+  "homepage": "https://github.com/dylandepass/edge-commerce-cli#readme",
+  "bugs": {
+    "url": "https://github.com/dylandepass/edge-commerce-cli/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public",
+    "tag": "preview"
+  },
+  "description": "Copy-in Edge Commerce storefront starter for EDS sites",
+  "bin": {
+    "edge-commerce": "./bin/edge-commerce.mjs"
+  },
+  "scripts": {
+    "lint": "node scripts/lint.mjs && npm run format:check",
+    "format": "prettier --write 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json prettier.config.cjs",
+    "format:check": "prettier --check 'bin/**/*.mjs' 'src/**/*.mjs' 'scripts/**/*.mjs' 'template/**/*.{js,css}' 'test/**/*.mjs' '.github/workflows/*.yml' package.json prettier.config.cjs",
+    "test": "node --test test/*.test.mjs",
+    "verify:package": "node scripts/verify-package.mjs"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "template/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "commander": "^14.0.3",
+    "diff": "^9.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "prettier": "^3.9.9"
+  }
+}

@@ -1,0 +1,5 @@
+# Minimal product page
+
+Author a `pdp` block on a product page. By default, it fetches `${pathname}.json` from the same storefront; alternatively, include a same-origin `.json` link in the block cell. The default `scripts/commerce/pdp-adapter.js` maps Product Pipeline product JSON (`sku`, `name`, `price`, `images`, `variants`, `availability`) to the shared cart item. Replace this adapter for other catalog schemas. No offer, inventory, or product detail is manufactured when data is missing. A configurable product requires a variant selection before Add to Cart.
+
+The independently installed PDP uses `scripts/commerce/site-config.js` and `product-to-cart.js` only; it has no PayPal, checkout, or API-origin dependency. Supply an existing cart destination or choose stay-on-page behavior until cart/checkout is added. Copying this block does not decide your page routes, merchandising, SEO metadata, or product publishing workflow. Validate its authored content and product JSON on a real storefront before launch.

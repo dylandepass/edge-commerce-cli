@@ -1,0 +1,26 @@
+main .pdp {
+  display: grid;
+  gap: 1rem;
+  max-width: 50rem;
+}
+main .pdp img {
+  display: block;
+  width: min(100%, 30rem);
+  height: auto;
+}
+main .pdp img[hidden] {
+  display: none;
+}
+main .pdp select,
+main .pdp input,
+main .pdp button {
+  font: inherit;
+  padding: 0.75rem;
+}
+main .pdp input {
+  width: 5rem;
+}
+main .pdp :focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
