@@ -97,7 +97,12 @@ export function validateSetup(input) {
   ) {
     fail('site.cartDestination', 'Provide an existing cart route or site.cartBehavior: "stay"');
   }
-  if (site?.cartDestination !== undefined && !routePattern.test(site.cartDestination)) {
+  if (
+    site?.cartDestination !== undefined &&
+    (typeof site.cartDestination !== 'string' ||
+      !routePattern.test(site.cartDestination) ||
+      site.cartDestination.startsWith('//'))
+  ) {
     fail('site.cartDestination', 'Use a same-site path');
   }
   if (site?.cartBehavior !== undefined && !['stay', 'navigate'].includes(site.cartBehavior)) {
