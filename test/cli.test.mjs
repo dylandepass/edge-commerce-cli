@@ -32,6 +32,14 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.equal(applied.json.outcome, 'applied');
   assert.equal(applied.stdout.trim().split('\n').length, 1);
   assert.equal(await readFile(path.join(target, 'AGENTS.md'), 'utf8'), 'Customer root guidance');
+  assert(!applied.json.operations.some((op) => op.path.startsWith('docs/')));
+  assert(applied.json.nextSteps.some((step) => step.includes('checkout-setup.md')));
+  await assert.rejects(access(path.join(target, 'docs/commerce/checkout-setup.md')));
+  for (const op of applied.json.operations.filter((item) => item.path.endsWith('/AGENTS.md'))) {
+    const guidance = await readFile(path.join(target, op.path), 'utf8');
+    assert.doesNotMatch(guidance, /`docs\/commerce\//);
+  }
+  await access(path.join(target, 'scripts/commerce/AGENTS.md'));
   for (const name of ['cart', 'checkout', 'order-review', 'order-complete', 'order-cancel']) {
     const folder = path.join(target, 'widgets', name);
     await access(path.join(folder, `${name}.js`));
@@ -131,6 +139,8 @@ test('real PDP-only install excludes checkout and supports adding checkout later
   await writeFile(pdpConfig, JSON.stringify(pdp));
   assert.equal(run('init', '--target', target, '--config', pdpConfig, '--yes', '--json').status, 0);
   await access(path.join(target, 'blocks/pdp/pdp.js'));
+  await access(path.join(target, 'blocks/pdp/AGENTS.md'));
+  await assert.rejects(access(path.join(target, 'docs/commerce/pdp.md')));
   await assert.rejects(access(path.join(target, 'widgets/checkout/checkout.js')));
   await assert.rejects(access(path.join(target, 'scripts/commerce/payments/paypal.js')));
   const core = await readFile(path.join(target, 'scripts/commerce/site-config.js'), 'utf8');

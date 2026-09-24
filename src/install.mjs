@@ -243,9 +243,16 @@ export async function planInstall({ templates, target, setup, mode = 'init' }) {
       ...(operations.some((op) => op.action === 'conflict')
         ? ['Resolve listed conflicts manually, then rerun dry-run']
         : []),
-      'Author and publish the documented commerce pages',
       ...(setup.features.includes('cart-checkout')
-        ? ['Configure server-side PayPal review settings before live checkout']
+        ? [
+            'Author and publish the commerce widget pages; see https://github.com/dylandepass/edge-commerce-cli/blob/main/docs/commerce/checkout-setup.md',
+            'Configure server-side PayPal review settings before live checkout',
+          ]
+        : []),
+      ...(setup.features.includes('pdp')
+        ? [
+            'Connect and validate product pages; see https://github.com/dylandepass/edge-commerce-cli/blob/main/docs/commerce/pdp.md',
+          ]
         : []),
     ],
   };
