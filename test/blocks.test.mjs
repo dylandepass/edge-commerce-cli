@@ -9,7 +9,7 @@ import { validateSetup } from '../src/config.mjs';
 import { planInstall, applyPlan } from '../src/install.mjs';
 
 const templates = fileURLToPath(new URL('../template/', import.meta.url));
-async function installed() {
+async function installed(paypalClientId = 'none') {
   const target = await mkdtemp(path.join(tmpdir(), 'edge-block-'));
   await writeFile(path.join(target, 'package.json'), '{"type":"module"}');
   await applyPlan(
@@ -35,7 +35,7 @@ async function installed() {
           complete: '/complete',
           cancel: '/cancel',
         },
-        paypal: { clientId: 'none' },
+        paypal: { clientId: paypalClientId },
       }),
     }),
   );
@@ -148,12 +148,71 @@ test('checkout restores tab-scoped form without declaring payment success', asyn
   assert.equal(widget.querySelector('[name="firstName"]').value, 'Sam');
   assert.equal(widget.querySelector('[name="email"]').value, 'sam@example.com');
   assert.equal(widget.querySelector('select').disabled, true);
+  assert.deepEqual(
+    [...widget.querySelectorAll('.checkout-section h2')].map((heading) => heading.textContent),
+    ['Contact information', 'Shipping address', 'Shipping method', 'Payment'],
+  );
+  assert.equal(widget.querySelectorAll('.checkout-summary-item').length, 1);
+  assert.match(widget.querySelector('.checkout-summary-total').textContent, /Review totals first/);
   assert.equal(
     [...widget.querySelectorAll('button')].find(
       (button) => button.textContent === 'Continue to PayPal',
     ).disabled,
     true,
   );
+  dom.window.close();
+});
+
+test('cart hides express checkout while the public PayPal ID is a setup placeholder', async () => {
+  const dom = browser('https://store.example.com/cart');
+  const load = await installed('your-public-sandbox-client-id');
+  const { getCart } = await load('scripts/commerce/cart.js');
+  getCart().add({
+    sku: 'p',
+    path: '/p',
+    name: 'Product',
+    quantity: 1,
+    price: { final: '10', currency: 'USD' },
+  });
+  const widget = await load.widget('cart');
+  const { default: decorate } = await load('widgets/cart/cart.js');
+  decorate(widget);
+  assert.equal(widget.querySelector('.commerce-cart-express'), null);
+  assert.equal(widget.querySelectorAll('.commerce-cart-summary a').length, 1);
+  dom.window.close();
+});
+
+test('checkout summary tracks cart changes without inventing a payment total', async () => {
+  const dom = browser('https://store.example.com/checkout');
+  const load = await installed();
+  const { getCart } = await load('scripts/commerce/cart.js');
+  const cart = getCart();
+  cart.add({
+    sku: 'p',
+    path: '/p',
+    name: 'Product',
+    quantity: 1,
+    price: { final: '10', currency: 'USD' },
+  });
+  const widget = await load.widget('checkout');
+  const { default: decorate } = await load('widgets/checkout/checkout.js');
+  decorate(widget);
+  assert.match(widget.querySelector('.checkout-summary-totals').textContent, /\$10/);
+  assert.match(widget.querySelector('.checkout-summary-total').textContent, /Review totals first/);
+
+  cart.add({
+    sku: 'q',
+    path: '/q',
+    name: 'Second',
+    quantity: 1,
+    price: { final: '20', currency: 'USD' },
+  });
+  assert.equal(widget.querySelectorAll('.checkout-summary-item').length, 2);
+  assert.match(widget.querySelector('.checkout-summary-totals').textContent, /\$30/);
+  assert.equal(widget.querySelector('.checkout-primary-action').disabled, true);
+  cart.clear();
+  assert.equal(widget.querySelector('.commerce-checkout-summary').hidden, true);
+  assert.match(widget.querySelector('.checkout-message').textContent, /cart is empty/);
   dom.window.close();
 });
 
@@ -292,12 +351,24 @@ test('cart UI updates the intended variant line, and API URL is scoped to org/si
   assert.equal(widget.querySelectorAll('.commerce-cart-summary').length, 1);
   assert.equal(widget.querySelectorAll('.commerce-cart-summary a').length, 1);
   assert(!widget.textContent.includes('PayPal is unavailable'));
-  widget.querySelectorAll('.cart-line button')[1].click();
+  assert.equal(widget.querySelectorAll('.cart-line-stepper').length, 2);
+  assert.equal(widget.querySelector('.cart-line-option').textContent, 'color: red');
+  widget.querySelector('[aria-label="Increase quantity for Red"]').click();
+  assert.equal(cart.items[0].quantity, 2);
+  assert.match(widget.querySelector('.commerce-cart-summary').textContent, /Subtotal: \$30/);
+  widget.querySelector('[aria-label="Decrease quantity for Red"]').click();
+  assert.equal(cart.items[0].quantity, 1);
+  const quantity = widget.querySelector('.cart-line-stepper input');
+  quantity.value = '0';
+  quantity.dispatchEvent(new dom.window.Event('change'));
+  assert.equal(cart.items.length, 2);
+  assert.equal(quantity.value, '1');
+  widget.querySelectorAll('.cart-line-remove')[1].click();
   assert.equal(cart.items.length, 1);
   assert.equal(cart.items[0].selectedOptions[0].value, 'red');
   assert.equal(widget.querySelectorAll('.cart-line').length, 1);
   assert.match(widget.querySelector('.commerce-cart-summary').textContent, /Subtotal: \$10/);
-  widget.querySelector('.cart-line button').click();
+  widget.querySelector('.cart-line-remove').click();
   assert.equal(widget.querySelectorAll('.cart-line').length, 0);
   assert.equal(widget.querySelector('.commerce-cart-summary').hidden, true);
   assert.match(widget.textContent, /Your cart is empty/);

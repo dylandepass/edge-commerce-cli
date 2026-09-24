@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { CliError, siteDefaults, validateSetup } from '../src/config.mjs';
+import { installedGuidance, postInstallChoice } from '../src/integration-guide.mjs';
 import {
   applyPlan,
   applyRemoval,
@@ -191,6 +192,27 @@ async function runInit(options, mode = 'init') {
 
   const result = await applyPlan(plan);
   output(result, options.json);
+  if (
+    mode === 'init' &&
+    interactive &&
+    process.stdout.isTTY &&
+    result.operations.some((op) => op.action === 'add')
+  ) {
+    try {
+      const prompts = await import('@clack/prompts');
+      const choice = await postInstallChoice(prompts);
+      if (choice !== 'later') {
+        const guide = await installedGuidance({ target: options.target || '.', mode: choice });
+        process.stdout.write(`\n${guide.guidance}\n`);
+      }
+    } catch {
+      // Guidance is optional; a terminal error cannot undo a successful install.
+      process.stdout.write('\nOptional setup guidance could not be shown.\n');
+    }
+    process.stdout.write(
+      '\nRevisit setup anytime: edge-commerce guide --mode manual (or --mode ai)\n',
+    );
+  }
 }
 
 const program = new Command();
@@ -206,7 +228,7 @@ program
   .version(JSON.parse(await readFile(new URL('../package.json', import.meta.url))).version)
   .addHelpText(
     'after',
-    '\nDefaults: cart storage namespace default; shopper locale en-US (US English).\nAPI routing: *.aem.page, *.aem.live, and localhost use staging; custom domains use production.\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n',
+    '\nDefaults: cart storage namespace default; shopper locale en-US (US English).\nAPI routing: *.aem.page, *.aem.live, and localhost use staging; custom domains use production.\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n  edge-commerce guide --target ./site --mode ai\n',
   );
 program
   .command('init')
@@ -223,7 +245,7 @@ program
   .option('--no-input', 'never prompt')
   .option('--yes', 'accept conflict-free installation plan')
   .option('--json', 'print one JSON result; disables prompts')
-  .action(runInit);
+  .action((options) => runInit(options, 'init'));
 program
   .command('upgrade')
   .description('Preview or apply conflict-free upstream source updates')
@@ -268,6 +290,16 @@ program
       if (prompts.isCancel(yes) || !yes) throw new CliError('CANCELLED', 'Removal cancelled.');
     }
     output(await applyRemoval(plan), options.json);
+  });
+program
+  .command('guide')
+  .description('Show read-only manual or AI integration guidance for an installed storefront')
+  .option('--target <directory>', 'EDS storefront directory', '.')
+  .option('--mode <manual|ai>', 'manual checklist or copyable AI prompt', 'manual')
+  .option('--json', 'print one machine-readable result; never prompts')
+  .action(async (options) => {
+    const result = await installedGuidance({ target: options.target, mode: options.mode });
+    process.stdout.write(`${options.json ? JSON.stringify(result) : result.guidance}\n`);
   });
 program
   .command('check')

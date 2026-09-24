@@ -20,7 +20,9 @@ Author and publish one page for each route in `scripts/commerce/checkout-config.
 | `routes.complete` | `/widgets/order-complete/order-complete.html` |
 | `routes.cancel` | `/widgets/order-cancel/order-cancel.html` |
 
-Use your storefront's code origin/branch in the authored URLs. Keep each widget link alone in its paragraph so the site's widget auto-blocking recognizes it. Widget HTML already contains the page heading; avoid authoring a second heading or legacy Cart/Cart Summary block on the same page. Existing authored pages must be changed manually; the CLI does not publish or rewrite content. Link your existing PDP to `addProductToCart`. Optionally load `styles/commerce-tokens.css` from your site's global stylesheet, or override its `--commerce-*` properties using site design tokens; widget CSS has fallbacks.
+Use your storefront's code origin/branch in the authored URLs. Keep each widget link alone in its paragraph so the site's widget auto-blocking recognizes it. Widget HTML already contains the page heading; avoid authoring a second heading or legacy Cart/Cart Summary block on the same page. Existing authored pages must be changed manually; the CLI does not publish or rewrite content. Link your existing PDP to `addProductToCart`.
+
+The default cart and checkout use responsive product, form, and order-summary cards. The checkout summary shows the cart subtotal until the Commerce API returns a previewed total; it does not estimate tax or shipping in the browser. To match your storefront, optionally load `styles/commerce-tokens.css` from your global stylesheet and override `--commerce-color-primary`, `--commerce-color-border`, `--commerce-radius-card`, `--commerce-summary-width`, and other `--commerce-*` properties. The widgets also have standalone CSS fallbacks when that stylesheet is not loaded.
 
 ## Configure payment and validate
 

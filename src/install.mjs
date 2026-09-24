@@ -245,13 +245,13 @@ export async function planInstall({ templates, target, setup, mode = 'init' }) {
         : []),
       ...(setup.features.includes('cart-checkout')
         ? [
-            'Author and publish the commerce widget pages; see https://github.com/dylandepass/edge-commerce-cli/blob/main/docs/commerce/checkout-setup.md',
+            'Run edge-commerce guide --mode manual (or --mode ai) for widget page authoring and storefront integration',
             'Configure server-side PayPal review settings before live checkout',
           ]
         : []),
       ...(setup.features.includes('pdp')
         ? [
-            'Connect and validate product pages; see https://github.com/dylandepass/edge-commerce-cli/blob/main/docs/commerce/pdp.md',
+            'Run edge-commerce guide --mode manual (or --mode ai) to connect and validate product pages',
           ]
         : []),
     ],
@@ -477,6 +477,10 @@ export async function checkInstall({ target }) {
   }
   return {
     version: 1,
+    release:
+      typeof data.release === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(data.release)
+        ? data.release
+        : null,
     outcome: operations.some((op) => op.action !== 'unchanged') ? 'blocked' : 'ready',
     features: [
       ...new Set(
@@ -489,6 +493,8 @@ export async function checkInstall({ target }) {
     errors: operations
       .filter((op) => op.action !== 'unchanged')
       .map((op) => ({ path: op.path, message: op.action })),
-    nextSteps: ['Confirm authored page routes and server-side PayPal settings manually'],
+    nextSteps: [
+      'Run edge-commerce guide --mode manual (or --mode ai) for integration guidance; confirm authored pages and server-side PayPal settings separately',
+    ],
   };
 }

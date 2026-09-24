@@ -33,7 +33,7 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.equal(applied.stdout.trim().split('\n').length, 1);
   assert.equal(await readFile(path.join(target, 'AGENTS.md'), 'utf8'), 'Customer root guidance');
   assert(!applied.json.operations.some((op) => op.path.startsWith('docs/')));
-  assert(applied.json.nextSteps.some((step) => step.includes('checkout-setup.md')));
+  assert(applied.json.nextSteps.some((step) => step.includes('edge-commerce guide')));
   await assert.rejects(access(path.join(target, 'docs/commerce/checkout-setup.md')));
   for (const op of applied.json.operations.filter((item) => item.path.endsWith('/AGENTS.md'))) {
     const guidance = await readFile(path.join(target, op.path), 'utf8');
@@ -53,6 +53,18 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.match(site, /"storeView": "default"/);
   assert.match(site, /"locale": "en-US"/);
   assert.doesNotMatch(checkout, /"origin":/);
+  const guide = run('guide', '--target', target, '--mode', 'ai', '--json');
+  assert.equal(guide.status, 0, guide.stderr);
+  assert.equal(guide.stdout.trim().split('\n').length, 1);
+  assert.match(guide.json.guidance, /\/cart: \/widgets\/cart\/cart\.html/);
+  assert.match(guide.json.guidance, /Stop and wait for my approval/);
+  assert.doesNotMatch(guide.stdout, /your-public-sandbox-client-id/);
+  const manifest = await readFile(path.join(target, '.edge-commerce/manifest.json'));
+  const manual = execFileSync(process.execPath, [bin, 'guide', '--target', target], {
+    encoding: 'utf8',
+  });
+  assert.match(manual, /Author and publish a page/);
+  assert.deepEqual(await readFile(path.join(target, '.edge-commerce/manifest.json')), manifest);
   assert.equal(run('check', '--target', target, '--json').json.outcome, 'ready');
   const repeat = run('init', '--target', target, '--config', config, '--yes', '--json');
   assert.equal(repeat.status, 0, repeat.stderr);
@@ -82,6 +94,9 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.equal(unknownFlag.status, 2);
   assert.equal(unknownFlag.json.errors[0].path, '$');
   assert.equal(unknownFlag.stdout.trim().split('\n').length, 1);
+  const invalidMode = run('guide', '--target', target, '--mode', 'other', '--json');
+  assert.equal(invalidMode.status, 2);
+  assert.equal(invalidMode.json.errors[0].path, 'mode');
   const help = execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' });
   assert.match(help, /Defaults: cart storage namespace default; shopper locale en-US/);
   assert.match(help, /API routing: \*\.aem\.page, \*\.aem\.live, and localhost use staging/);
