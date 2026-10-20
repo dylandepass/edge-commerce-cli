@@ -467,3 +467,125 @@ test('review retries same confirm key; pending and lookup failure cannot show su
   assert.equal(await flow.cancel('one'), 'cancelled');
   assert.equal(cleared, 1);
 });
+
+test('express flow carries the PayPal session capability end to end', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const calls = [];
+  const api = {
+    createSession: async () => ({ paypalOrderId: 'pp-1', sessionToken: 'cap-1' }),
+    patchSession: async (id, payload, token) => {
+      calls.push(['patch', payload.type, token]);
+      return { shippingMethods: [{ id: 'standard' }] };
+    },
+    preview: async () => ({ estimateToken: 'token' }),
+    getSession: async (id, country, locale, token) => {
+      calls.push(['get', token]);
+      return {
+        payer: { email: 'p@example.com', firstName: 'P', lastName: 'B' },
+        shippingAddress: { address1: 'Main', city: 'LA', state: 'CA', zip: '90001', country: 'us' },
+        selectedOptionId: 'standard',
+      };
+    },
+    createOrder: async () => ({ order: { id: 'one' } }),
+    initiate: async (id, body) => {
+      calls.push(['initiate', body.paypalOrderId, body.paypalSessionToken]);
+      return { action: 'review' };
+    },
+  };
+  const storage = store();
+  const flow = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await flow.start();
+  assert.equal(JSON.parse(storage.getItem('edge-commerce:express-session')).sessionToken, 'cap-1');
+  await flow.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  await flow.setShippingOption('standard');
+  await flow.approve('pp-1');
+  assert.deepEqual(calls, [
+    ['patch', 'address', 'cap-1'],
+    ['patch', 'option', 'cap-1'],
+    ['get', 'cap-1'],
+    ['initiate', 'pp-1', 'cap-1'],
+  ]);
+});
+
+test('a resumed express flow keeps using the persisted capability', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const tokens = [];
+  const api = {
+    createSession: async () => ({ paypalOrderId: 'pp-1', sessionToken: 'cap-1' }),
+    patchSession: async () => ({ shippingMethods: [{ id: 'standard' }] }),
+    preview: async () => ({ estimateToken: 'token' }),
+    getSession: async (id, country, locale, token) => {
+      tokens.push(token);
+      return {
+        payer: { email: 'p@example.com', firstName: 'P', lastName: 'B' },
+        shippingAddress: { address1: 'Main', city: 'LA', state: 'CA', zip: '90001', country: 'us' },
+        selectedOptionId: 'standard',
+      };
+    },
+    createOrder: async () => ({ order: { id: 'one' } }),
+    initiate: async (id, body) => {
+      tokens.push(body.paypalSessionToken);
+      return { action: 'review' };
+    },
+  };
+  const storage = store();
+  const first = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await first.start();
+  await first.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  const resumed = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await resumed.approve('pp-1');
+  assert.deepEqual(tokens, ['cap-1', 'cap-1']);
+});
+
+test('restored draft without sessionToken sends no token', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const storage = store();
+  storage.setItem('edge-commerce:express-session', JSON.stringify({ sessionId: 'pp-old' }));
+  const seen = [];
+  const api = {
+    patchSession: async (id, payload, token) => {
+      seen.push(token);
+      return { shippingMethods: [{ id: 'standard' }] };
+    },
+    preview: async () => ({ estimateToken: 'token' }),
+  };
+  const flow = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await flow.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  assert.deepEqual(seen, [undefined]);
+});
+
+test('api sends x-paypal-session only when a token is given', async () => {
+  const { load } = await modules();
+  const { createApi } = await load('api.js');
+  const seen = [];
+  const fetcher = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const api = createApi({
+    fetcher,
+    settings: { api: { origin: 'https://api.example.com', org: 'o', site: 's' } },
+  });
+  await api.patchSession('pp-1', { type: 'option' }, 'cap-1');
+  await api.patchSession('pp-1', { type: 'option' });
+  await api.getSession('pp-1', 'us', 'en-US', 'cap-1');
+  await api.getSession('pp-1', 'us', 'en-US');
+  assert.equal(seen[0].headers['x-paypal-session'], 'cap-1');
+  assert.equal(seen[0].headers['Content-Type'], 'application/json');
+  assert.equal('x-paypal-session' in seen[1].headers, false);
+  assert.equal(seen[2].headers['x-paypal-session'], 'cap-1');
+  assert.ok(!seen[2].url.includes('cap-1'));
+  assert.equal('x-paypal-session' in seen[3].headers, false);
+});

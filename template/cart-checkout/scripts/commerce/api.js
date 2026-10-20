@@ -26,6 +26,14 @@ export class CommerceError extends Error {
   }
 }
 
+/**
+ * Header carrying the PayPal session capability returned by createSession. The
+ * Commerce API requires it on PayPal session PATCH/GET calls.
+ */
+const PAYPAL_SESSION_HEADER = 'x-paypal-session';
+const paypalSessionHeaders = (sessionToken) =>
+  sessionToken ? { [PAYPAL_SESSION_HEADER]: sessionToken } : {};
+
 /** Guest calls may require site-provided reCAPTCHA; never place a server credential here. */
 export function createApi({
   fetcher = fetch,
@@ -36,8 +44,11 @@ export function createApi({
   const origin = resolveApiOrigin(hostname, settings.api.origin);
   const base = `${origin.replace(/\/$/, '')}/${encodeURIComponent(settings.api.org)}/sites/${encodeURIComponent(settings.api.site)}`;
 
-  async function request(method, route, data, recaptchaAction) {
-    const headers = { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) };
+  async function request(method, route, data, recaptchaAction, extraHeaders = {}) {
+    const headers = {
+      ...extraHeaders,
+      ...(data === undefined ? {} : { 'Content-Type': 'application/json' }),
+    };
 
     if (recaptchaAction && getRecaptchaToken) {
       const token = await getRecaptchaToken(recaptchaAction);
@@ -80,12 +91,21 @@ export function createApi({
     order: (email, id) =>
       request('GET', `/customers/${encodeURIComponent(email)}/orders/${encodeURIComponent(id)}`),
     createSession: (body) => request('POST', '/payments/paypal/session', body),
-    patchSession: (id, body) =>
-      request('PATCH', `/payments/paypal/session/${encodeURIComponent(id)}`, body),
-    getSession: (id, country, locale) =>
+    patchSession: (id, body, sessionToken) =>
+      request(
+        'PATCH',
+        `/payments/paypal/session/${encodeURIComponent(id)}`,
+        body,
+        undefined,
+        paypalSessionHeaders(sessionToken),
+      ),
+    getSession: (id, country, locale, sessionToken) =>
       request(
         'GET',
         `/payments/paypal/session/${encodeURIComponent(id)}?${new URLSearchParams({ country, locale })}`,
+        undefined,
+        undefined,
+        paypalSessionHeaders(sessionToken),
       ),
   };
 }
