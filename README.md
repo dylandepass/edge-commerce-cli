@@ -1,6 +1,6 @@
 # Edge Commerce CLI
 
-Copies customer-owned EDS cart/checkout and optional PDP source into an existing storefront. Node 20+ runs the installer; copied browser modules use no npm runtime dependency. This is an initial sandbox-oriented starter. PayPal v6 compatibility, country/address coverage, and server setup need merchant validation before production use.
+Copies customer-owned EDS cart/checkout widgets and optional PDP block source into an existing storefront. Node 20+ runs the installer; copied browser modules use no npm runtime dependency. This is an initial sandbox-oriented starter. PayPal v6 compatibility, country/address coverage, and server setup need merchant validation before production use.
 
 ## Local use
 
@@ -9,12 +9,22 @@ npm install
 node bin/edge-commerce.mjs init --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --dry-run --json
 node bin/edge-commerce.mjs init --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --yes --json
 node bin/edge-commerce.mjs check --target /path/to/eds-storefront --json
+node bin/edge-commerce.mjs guide --target /path/to/eds-storefront --mode ai
 node bin/edge-commerce.mjs init --feature pdp --target /path/to/eds-storefront --config examples/pdp-setup.json --no-input --dry-run --json
+node bin/edge-commerce.mjs init --feature pdp --target /path/to/eds-storefront --config examples/pdp-catalog-setup.json --no-input --dry-run --json
 node bin/edge-commerce.mjs upgrade --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --dry-run --json
 node bin/edge-commerce.mjs remove --feature cart-checkout --target /path/to/eds-storefront --no-input --dry-run --json
 ```
 
-Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--feature pdp` installs the PDP plus cart core without checkout. Repeat `--feature` for both (and list both in your config). `upgrade` shows per-file diffs and requires `--yes` to apply only when installed files still match their recorded hashes. `remove` removes unchanged files for the chosen profile; edited files stay with the customer. Conflicts block the entire install, including generated configuration. No `postinstall` mutates the storefront. See copied `docs/commerce/setup.md` for authored page and integration steps. The CLI never accepts PayPal server secrets.
+Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--feature pdp` installs the PDP plus cart core without checkout; choose **Catalog only** in the wizard (or `"pdp": { "mode": "catalog" }`) for a PDP with no prices or cart, which skips the cart core. The PDP reads the Product Pipeline page (Product JSON-LD and rendered pictures) and inserts two hooks into supported `scripts/scripts.js` loaders, with a dry-run diff and manual fallback for custom or already integrated loaders; see the [product page guide](docs/commerce/pdp.md). Repeat `--feature` for both (and list both in your config). `upgrade` shows per-file diffs and requires `--yes` to apply only when installed files still match their recorded hashes. `remove` removes unchanged files for the chosen profile; edited files stay with the customer. Conflicts block the entire install, including generated configuration. No `postinstall` mutates the storefront. See the CLI's [checkout setup guide](docs/commerce/checkout-setup.md) for widget links, page authoring, and integration steps. Guides stay in the CLI package; they are not copied into storefronts. The storefront must support AEM widget links; the CLI does not add widget loading or publish pages. The managed PDP regions in `scripts.js` are tracked separately from customer code and removed with the PDP feature. Edited or moved managed hooks block upgrade/removal until reviewed. The CLI never accepts PayPal server secrets.
+
+## After installation
+
+On an interactive terminal, a successful new install prints an authored-page and installed-file blueprint, followed by the command for an optional copyable AI prompt. There is no post-install choice. Revisit the blueprint with `edge-commerce guide --target /path/to/eds-storefront --mode manual`, or print the prompt with `--mode ai`; `--json` produces one machine-readable result. The CLI's [checkout setup guide](docs/commerce/checkout-setup.md) remains available without AI. Guidance uses only public, allowlisted routes and currency; it never runs an AI model, reads `.env` files, imports customer JavaScript, edits customer files, or collects model/merchant tokens. Use your own coding agent and tokens only if you choose the optional prompt. Dry runs, upgrades, `--no-input`, and `--json` installs do not print a post-install blueprint (interactive setup questions may still appear before a dry run). Authored-page publishing and merchant sandbox validation remain separate.
+
+Cart lines require an explicit price currency matching the configured checkout currency; other-currency and currency-less offers are rejected rather than relabeled. Existing PDPs backed by Product/Offer JSON-LD can opt into the copied `scripts/commerce/jsonld-adapter.js` to map a selected Offer without copying heavy product metadata. See the CLI's [storefront setup guide](docs/commerce/setup.md) for usage.
+
+The cart storage namespace (`site.storeView`) defaults to `default`; it is not a required Commerce API store view. The shopper locale (`site.locale`) defaults to `en-US` for US English. The wizard shows both defaults; change the locale for other markets. JSON setup may omit these fields or leave them blank, but currency and checkout country still need values. For checkout, the API origin is selected in the browser: `*.aem.page`, `*.aem.live`, and localhost use `https://api-stage.adobecommerce.live`; custom domains use `https://api.adobecommerce.live`. Provide `api.org` and `api.site`; set a public `api.origin` in JSON only when a custom staging domain or proxy needs an override. PayPal sandbox/live settings are separate from API routing.
 
 `npm run format` formats JS and CSS; `npm run lint` checks syntax and Prettier formatting. `npm test` runs unit and fixture tests; `npm run verify:package` checks and installs the npm tarball in a disposable directory. No live checkout or browser acceptance tests are included yet.
 

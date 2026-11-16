@@ -15,13 +15,22 @@ const required = [
   'bin/edge-commerce.mjs',
   'src/config.mjs',
   'src/install.mjs',
+  'src/integration-guide.mjs',
   'template/cart-core/scripts/commerce/cart.js',
-  'template/cart-checkout/blocks/checkout/checkout.js',
+  'template/cart-core/scripts/commerce/jsonld-adapter.js',
+  'template/cart-checkout/widgets/cart/cart.html',
+  'template/cart-checkout/widgets/checkout/checkout.js',
   'template/pdp/blocks/pdp/pdp.js',
+  'docs/commerce/setup.md',
+  'docs/commerce/checkout-setup.md',
+  'docs/commerce/architecture.md',
+  'docs/commerce/pdp.md',
 ];
 const allowed = (file) =>
   ['LICENSE', 'README.md', 'package.json'].includes(file) ||
-  ['bin/', 'src/', 'template/', 'examples/'].some((prefix) => file.startsWith(prefix));
+  ['bin/', 'src/', 'template/', 'docs/commerce/', 'examples/'].some((prefix) =>
+    file.startsWith(prefix),
+  );
 
 try {
   assert.notEqual(pkg.private, true, 'The npm package must be publishable');
@@ -36,6 +45,11 @@ try {
 
   assert.equal(packed.name, pkg.name);
   assert.equal(packed.version, pkg.version);
+  for (const name of ['cart', 'checkout', 'order-review', 'order-complete', 'order-cancel']) {
+    for (const extension of ['html', 'css', 'js']) {
+      required.push(`template/cart-checkout/widgets/${name}/${name}.${extension}`);
+    }
+  }
   for (const file of required) {
     assert.ok(files.has(file), `Missing published file: ${file}`);
   }
@@ -85,8 +99,31 @@ try {
     ),
   );
   assert.equal(plan.outcome, 'ready');
-  assert.ok(plan.operations.some((file) => file.path === 'blocks/checkout/checkout.js'));
-  assert.ok(!existsSync(path.join(storefront, 'blocks/checkout/checkout.js')));
+  assert.ok(plan.operations.some((file) => file.path === 'widgets/checkout/checkout.js'));
+  assert.ok(!plan.operations.some((file) => file.path.startsWith('docs/')));
+  assert.ok(!existsSync(path.join(storefront, 'widgets/checkout/checkout.js')));
+
+  execFileSync(
+    binary,
+    [
+      'init',
+      '--target',
+      storefront,
+      '--config',
+      path.join(root, 'examples/commerce-setup.json'),
+      '--no-input',
+      '--yes',
+      '--json',
+    ],
+    { encoding: 'utf8' },
+  );
+  const guide = JSON.parse(
+    execFileSync(binary, ['guide', '--target', storefront, '--mode', 'ai', '--json'], {
+      encoding: 'utf8',
+    }),
+  );
+  assert.match(guide.guidance, /Stop and wait for my approval/);
+  assert.ok(!existsSync(path.join(storefront, 'docs/commerce/checkout-setup.md')));
 
   console.log(`Verified ${packed.name}@${packed.version} (${files.size} packaged files)`);
 } finally {

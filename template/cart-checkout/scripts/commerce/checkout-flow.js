@@ -128,6 +128,9 @@ export function createExpressFlow({
   if (typeof restored !== 'object' || Array.isArray(restored)) restored = {};
 
   let sessionId = restored.sessionId;
+  // PayPal session capability returned by createSession; sent on every later
+  // session call and on payment initiation. Absent for older APIs and drafts.
+  let sessionToken = restored.sessionToken;
   let address = restored.address;
   let methods = restored.methods || [];
   let selected = restored.selected;
@@ -137,7 +140,7 @@ export function createExpressFlow({
   const persist = () =>
     storage.setItem(
       draftKey,
-      JSON.stringify({ sessionId, address, methods, selected, quote, pending }),
+      JSON.stringify({ sessionId, sessionToken, address, methods, selected, quote, pending }),
     );
 
   async function previewFor(method) {
@@ -175,6 +178,7 @@ export function createExpressFlow({
       if (!response.paypalOrderId) throw new Error('No PayPal order ID');
 
       sessionId = response.paypalOrderId;
+      sessionToken = response.sessionToken;
       address = null;
       methods = [];
       selected = null;
@@ -192,18 +196,22 @@ export function createExpressFlow({
       selected = null;
       methods = [];
       persist();
-      const response = await api.patchSession(sessionId, {
-        type: 'address',
-        country: country(),
-        locale: site.locale,
-        currency: site.currency,
-        address: {
-          country: value.countryCode || value.country,
-          state: value.state,
-          zip: value.postalCode || value.zip,
+      const response = await api.patchSession(
+        sessionId,
+        {
+          type: 'address',
+          country: country(),
+          locale: site.locale,
+          currency: site.currency,
+          address: {
+            country: value.countryCode || value.country,
+            state: value.state,
+            zip: value.postalCode || value.zip,
+          },
+          items: cart.getOrderItems(),
         },
-        items: cart.getOrderItems(),
-      });
+        sessionToken,
+      );
       methods = response.shippingMethods || [];
       if (!methods.length) throw new Error('No shipping methods for this address');
 
@@ -219,16 +227,20 @@ export function createExpressFlow({
       quote = null;
       selected = null;
       persist();
-      await api.patchSession(sessionId, {
-        type: 'option',
-        country: country(),
-        locale: site.locale,
-        currency: site.currency,
-        selectedOptionId: method.id,
-        total: method.total,
-        taxAmount: method.taxAmount,
-        shippingRate: method.rate,
-      });
+      await api.patchSession(
+        sessionId,
+        {
+          type: 'option',
+          country: country(),
+          locale: site.locale,
+          currency: site.currency,
+          selectedOptionId: method.id,
+          total: method.total,
+          taxAmount: method.taxAmount,
+          shippingRate: method.rate,
+        },
+        sessionToken,
+      );
       return previewFor(method);
     },
 
@@ -243,7 +255,7 @@ export function createExpressFlow({
         throw new Error('Cart or PayPal session changed; restart checkout');
       }
 
-      const result = await api.getSession(sessionId, country(), site.locale);
+      const result = await api.getSession(sessionId, country(), site.locale, sessionToken);
       if (!result?.payer?.email || !result?.shippingAddress) {
         throw new Error('PayPal did not provide buyer details');
       }
@@ -289,6 +301,7 @@ export function createExpressFlow({
         paymentMethod: 'paypal',
         idempotencyKey: pending.key,
         paypalOrderId: sessionId,
+        ...(sessionToken ? { paypalSessionToken: sessionToken } : {}),
       });
       if (payment.action !== 'review') throw new Error('PayPal Express must enter order review');
 

@@ -14,7 +14,7 @@ function validItem(item, currency) {
     String(final).trim() !== '' &&
     Number.isFinite(Number(final)) &&
     Number(final) >= 0 &&
-    (!item.price.currency || item.price.currency === currency)
+    item.price.currency === currency
   );
 }
 
@@ -35,12 +35,14 @@ export function lineId(item) {
 }
 
 export function toOrderItems(items, currency) {
+  // Never relabel a browser-provided amount as the storefront currency.
+  if (items.some((item) => !validItem(item, currency))) throw new Error('Invalid cart item');
   return items.map((item) => ({
     sku: item.sku,
     path: item.path,
     quantity: item.quantity,
     name: item.name,
-    price: { final: String(item.price.final), currency },
+    price: { final: String(item.price.final), currency: item.price.currency },
     ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
     ...(item.productUrl ? { productUrl: item.productUrl } : {}),
     ...(item.selectedOptions?.length ? { selectedOptions: item.selectedOptions } : {}),

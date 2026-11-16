@@ -1,0 +1,14 @@
+main .order-review {
+  max-width: 42rem;
+  margin-inline: auto;
+  padding: 1rem;
+  text-align: left;
+}
+main .order-review button {
+  margin: 0.5rem 0.5rem 0.5rem 0;
+  padding: 0.75rem 1rem;
+}
+main .order-review :focus-visible {
+  outline: 2px solid var(--commerce-focus, currentcolor);
+  outline-offset: 2px;
+}

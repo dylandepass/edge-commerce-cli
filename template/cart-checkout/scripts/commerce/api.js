@@ -1,5 +1,23 @@
 import config from './checkout-config.js';
 
+const stageOrigin = 'https://api-stage.adobecommerce.live';
+const productionOrigin = 'https://api.adobecommerce.live';
+
+export function resolveApiOrigin(hostname, override) {
+  if (override) return override;
+  if (!hostname) throw new Error('Storefront hostname is required to select a Commerce API origin');
+
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (
+    ['localhost', '127.0.0.1', '[::1]', '::1', 'aem.page', 'aem.live'].includes(host) ||
+    host.endsWith('.aem.page') ||
+    host.endsWith('.aem.live')
+  ) {
+    return stageOrigin;
+  }
+  return productionOrigin;
+}
+
 export class CommerceError extends Error {
   constructor(status, body) {
     super(body?.message || `Commerce API request failed (${status})`);
@@ -8,12 +26,29 @@ export class CommerceError extends Error {
   }
 }
 
-/** Guest calls may require site-provided reCAPTCHA; never place a server credential here. */
-export function createApi({ fetcher = fetch, settings = config, getRecaptchaToken } = {}) {
-  const base = `${settings.api.origin}/${encodeURIComponent(settings.api.org)}/sites/${encodeURIComponent(settings.api.site)}`;
+/**
+ * Header carrying the PayPal session capability returned by createSession. The
+ * Commerce API requires it on PayPal session PATCH/GET calls.
+ */
+const PAYPAL_SESSION_HEADER = 'x-paypal-session';
+const paypalSessionHeaders = (sessionToken) =>
+  sessionToken ? { [PAYPAL_SESSION_HEADER]: sessionToken } : {};
 
-  async function request(method, route, data, recaptchaAction) {
-    const headers = { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) };
+/** Guest calls may require site-provided reCAPTCHA; never place a server credential here. */
+export function createApi({
+  fetcher = fetch,
+  settings = config,
+  getRecaptchaToken,
+  hostname = globalThis.location?.hostname,
+} = {}) {
+  const origin = resolveApiOrigin(hostname, settings.api.origin);
+  const base = `${origin.replace(/\/$/, '')}/${encodeURIComponent(settings.api.org)}/sites/${encodeURIComponent(settings.api.site)}`;
+
+  async function request(method, route, data, recaptchaAction, extraHeaders = {}) {
+    const headers = {
+      ...extraHeaders,
+      ...(data === undefined ? {} : { 'Content-Type': 'application/json' }),
+    };
 
     if (recaptchaAction && getRecaptchaToken) {
       const token = await getRecaptchaToken(recaptchaAction);
@@ -56,12 +91,21 @@ export function createApi({ fetcher = fetch, settings = config, getRecaptchaToke
     order: (email, id) =>
       request('GET', `/customers/${encodeURIComponent(email)}/orders/${encodeURIComponent(id)}`),
     createSession: (body) => request('POST', '/payments/paypal/session', body),
-    patchSession: (id, body) =>
-      request('PATCH', `/payments/paypal/session/${encodeURIComponent(id)}`, body),
-    getSession: (id, country, locale) =>
+    patchSession: (id, body, sessionToken) =>
+      request(
+        'PATCH',
+        `/payments/paypal/session/${encodeURIComponent(id)}`,
+        body,
+        undefined,
+        paypalSessionHeaders(sessionToken),
+      ),
+    getSession: (id, country, locale, sessionToken) =>
       request(
         'GET',
         `/payments/paypal/session/${encodeURIComponent(id)}?${new URLSearchParams({ country, locale })}`,
+        undefined,
+        undefined,
+        paypalSessionHeaders(sessionToken),
       ),
   };
 }

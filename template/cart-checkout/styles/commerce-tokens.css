@@ -1,6 +1,18 @@
-/* Optional storefront overrides for the installed commerce blocks. Load in your EDS site's global styles. */
+/* Optional storefront overrides for the installed commerce widgets. Load in your EDS site's global styles. */
 :root {
-  --commerce-border: #ccc;
-  --commerce-focus: currentcolor;
-  --commerce-space: 1rem;
+  --commerce-color-primary: var(--link-color, #c2410c);
+  --commerce-color-primary-text: #fff;
+  --commerce-color-text: var(--text-color, #1a1a1a);
+  --commerce-color-text-muted: #6b7280;
+  --commerce-color-background: var(--background-color, #fff);
+  --commerce-color-surface: #f9fafb;
+  --commerce-color-border: #e5e7eb;
+  --commerce-radius-card: 12px;
+  --commerce-input-radius: 6px;
+  --commerce-button-radius: 6px;
+  --commerce-button-height: 3rem;
+  --commerce-max-width: 1300px;
+  --commerce-summary-width: 420px;
+  --commerce-sticky-top: 2rem;
+  --commerce-focus: var(--commerce-color-primary);
 }

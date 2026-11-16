@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "features": ["pdp"],
+  "site": { "locale": "en-GB" },
+  "productSource": "starter-pdp",
+  "pdp": {
+    "mode": "catalog",
+    "previewProxyKey": "your-public-cors-proxy-key",
+    "previewProductPath": "/products/"
+  }
+}

@@ -26,12 +26,46 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.equal(dry.status, 0);
   assert.equal(dry.json.outcome, 'ready');
   assert.equal(dry.stdout.trim().split('\n').length, 1);
-  await assert.rejects(access(path.join(target, 'blocks/cart/cart.js')));
+  await assert.rejects(access(path.join(target, 'widgets/cart/cart.js')));
   const applied = run('init', '--target', target, '--config', config, '--yes', '--json');
   assert.equal(applied.status, 0, applied.stderr);
   assert.equal(applied.json.outcome, 'applied');
   assert.equal(applied.stdout.trim().split('\n').length, 1);
   assert.equal(await readFile(path.join(target, 'AGENTS.md'), 'utf8'), 'Customer root guidance');
+  assert(!applied.json.operations.some((op) => op.path.startsWith('docs/')));
+  assert(applied.json.nextSteps.some((step) => step.includes('edge-commerce guide')));
+  await assert.rejects(access(path.join(target, 'docs/commerce/checkout-setup.md')));
+  for (const op of applied.json.operations.filter((item) => item.path.endsWith('/AGENTS.md'))) {
+    const guidance = await readFile(path.join(target, op.path), 'utf8');
+    assert.doesNotMatch(guidance, /`docs\/commerce\//);
+  }
+  await access(path.join(target, 'scripts/commerce/AGENTS.md'));
+  for (const name of ['cart', 'checkout', 'order-review', 'order-complete', 'order-cancel']) {
+    const folder = path.join(target, 'widgets', name);
+    await access(path.join(folder, `${name}.js`));
+    await access(path.join(folder, `${name}.css`));
+    assert.match(await readFile(path.join(folder, `${name}.html`), 'utf8'), /<h1>/);
+  }
+  await assert.rejects(access(path.join(target, 'blocks/cart/cart.js')));
+  await assert.rejects(access(path.join(target, 'blocks/cart-summary/cart-summary.js')));
+  const site = await readFile(path.join(target, 'scripts/commerce/site-config.js'), 'utf8');
+  const checkout = await readFile(path.join(target, 'scripts/commerce/checkout-config.js'), 'utf8');
+  assert.match(site, /"storeView": "default"/);
+  assert.match(site, /"locale": "en-US"/);
+  assert.doesNotMatch(checkout, /"origin":/);
+  const guide = run('guide', '--target', target, '--mode', 'ai', '--json');
+  assert.equal(guide.status, 0, guide.stderr);
+  assert.equal(guide.stdout.trim().split('\n').length, 1);
+  assert.match(guide.json.guidance, /\/cart: \/widgets\/cart\/cart\.html/);
+  assert.match(guide.json.guidance, /Stop and wait for my approval/);
+  assert.doesNotMatch(guide.stdout, /your-public-sandbox-client-id/);
+  const manifest = await readFile(path.join(target, '.edge-commerce/manifest.json'));
+  const manual = execFileSync(process.execPath, [bin, 'guide', '--target', target], {
+    encoding: 'utf8',
+  });
+  assert.match(manual, /Authored page blueprint/);
+  assert.match(manual, /Code already copied/);
+  assert.deepEqual(await readFile(path.join(target, '.edge-commerce/manifest.json')), manifest);
   assert.equal(run('check', '--target', target, '--json').json.outcome, 'ready');
   const repeat = run('init', '--target', target, '--config', config, '--yes', '--json');
   assert.equal(repeat.status, 0, repeat.stderr);
@@ -61,13 +95,21 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   assert.equal(unknownFlag.status, 2);
   assert.equal(unknownFlag.json.errors[0].path, '$');
   assert.equal(unknownFlag.stdout.trim().split('\n').length, 1);
+  const invalidMode = run('guide', '--target', target, '--mode', 'other', '--json');
+  assert.equal(invalidMode.status, 2);
+  assert.equal(invalidMode.json.errors[0].path, 'mode');
+  const help = execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' });
+  assert.match(help, /Defaults: cart storage namespace default; shopper locale en-US/);
+  assert.match(help, /API routing: \*\.aem\.page, \*\.aem\.live, and localhost use staging/);
 });
 
 test('CLI rejects missing fields/secrets on non-TTY and --yes cannot override a conflict', async () => {
   const target = await mkdtemp(path.join(tmpdir(), 'edge-cli-bad-'));
   const missing = run('init', '--target', target, '--dry-run', '--json');
   assert.equal(missing.status, 2);
-  assert(missing.json.errors.some((field) => field.path === 'site.storeView'));
+  assert(missing.json.errors.some((field) => field.path === 'site.currency'));
+  assert(!missing.json.errors.some((field) => field.path === 'site.storeView'));
+  assert(!missing.json.errors.some((field) => field.path === 'site.locale'));
   assert.equal(missing.stdout.trim().split('\n').length, 1);
   const raw = JSON.parse(await readFile(config, 'utf8'));
   raw.paypal.clientSecret = 'never-write-this';
@@ -77,7 +119,7 @@ test('CLI rejects missing fields/secrets on non-TTY and --yes cannot override a 
   assert.equal(invalid.status, 2);
   assert(!invalid.stdout.includes('never-write-this'));
   assert.equal(invalid.json.errors[0].path, 'paypal.clientSecret');
-  await writeFile(path.join(target, 'blocks'), 'customer file');
+  await writeFile(path.join(target, 'widgets'), 'customer file');
   const conflict = run('init', '--target', target, '--config', config, '--yes', '--json');
   assert.equal(conflict.status, 3);
   assert.equal(conflict.json.outcome, 'blocked');
@@ -98,7 +140,7 @@ test('existing subtree AGENTS.md blocks install and leaves customer instructions
   );
   assert(result.json.nextSteps.some((step) => step.includes('conflicts manually')));
   assert.equal(await readFile(path.join(owned, 'AGENTS.md'), 'utf8'), '# Customer guidance\n');
-  await assert.rejects(access(path.join(target, 'blocks/cart/cart.js')));
+  await assert.rejects(access(path.join(target, 'widgets/cart/cart.js')));
 });
 
 test('real PDP-only install excludes checkout and supports adding checkout later', async () => {
@@ -113,13 +155,15 @@ test('real PDP-only install excludes checkout and supports adding checkout later
   await writeFile(pdpConfig, JSON.stringify(pdp));
   assert.equal(run('init', '--target', target, '--config', pdpConfig, '--yes', '--json').status, 0);
   await access(path.join(target, 'blocks/pdp/pdp.js'));
-  await assert.rejects(access(path.join(target, 'blocks/checkout/checkout.js')));
+  await access(path.join(target, 'blocks/pdp/AGENTS.md'));
+  await assert.rejects(access(path.join(target, 'docs/commerce/pdp.md')));
+  await assert.rejects(access(path.join(target, 'widgets/checkout/checkout.js')));
   await assert.rejects(access(path.join(target, 'scripts/commerce/payments/paypal.js')));
   const core = await readFile(path.join(target, 'scripts/commerce/site-config.js'), 'utf8');
   const later = run('init', '--target', target, '--config', config, '--yes', '--json');
   assert.equal(later.status, 0, later.stderr);
   assert.equal(await readFile(path.join(target, 'scripts/commerce/site-config.js'), 'utf8'), core);
-  await access(path.join(target, 'blocks/checkout/checkout.js'));
+  await access(path.join(target, 'widgets/checkout/checkout.js'));
 });
 
 test('copied JS relative imports resolve within each installed profile', async () => {
@@ -139,4 +183,45 @@ test('copied JS relative imports resolve within each installed profile', async (
     }
   }
   assert.match(execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' }), /init/);
+});
+
+test('CLI previews, applies and removes managed PDP hooks and rejects edited-hook removal', async () => {
+  const target = await mkdtemp(path.join(tmpdir(), 'edge-cli-hooks-'));
+  await mkdir(path.join(target, 'scripts'));
+  const script = path.join(target, 'scripts/scripts.js');
+  const original = 'function buildAutoBlocks(main) {}\nasync function loadEager(doc) {}\n';
+  await writeFile(script, original);
+  const pdpConfig = path.join(root, 'examples/pdp-catalog-setup.json');
+  const args = ['init', '--target', target, '--config', pdpConfig, '--no-input'];
+  const dry = run(...args, '--dry-run', '--json');
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(
+    dry.json.operations.find((op) => op.path === 'scripts/scripts.js')?.action,
+    'update',
+  );
+  assert.equal(await readFile(script, 'utf8'), original);
+  const unapproved = run(...args, '--json');
+  assert.equal(unapproved.status, 2);
+  assert.equal(await readFile(script, 'utf8'), original);
+  assert.equal(run(...args, '--yes', '--json').status, 0);
+  const installed = await readFile(script, 'utf8');
+  assert.notEqual(installed, original);
+  const guide = run('guide', '--target', target, '--json');
+  assert.match(guide.json.guidance, /PDP hooks already installed/);
+  assert.doesNotMatch(guide.json.guidance, /Manually integrate/);
+  await writeFile(script, installed.replace('await loadPDPPreview();', 'loadPDPPreview();'));
+  const removeArgs = ['remove', '--target', target, '--feature', 'pdp'];
+  const blocked = run(...removeArgs, '--dry-run', '--json');
+  assert.equal(blocked.status, 3);
+  assert.equal(blocked.json.outcome, 'blocked');
+  assert.equal(run(...removeArgs, '--yes', '--json').status, 3);
+  await access(path.join(target, 'scripts/commerce/pdp-page.js'));
+  await writeFile(script, installed);
+  const preview = run(...removeArgs, '--dry-run', '--json');
+  assert.match(
+    preview.json.operations.find((op) => op.path === 'scripts/scripts.js').diff,
+    /-.*loadPDPPreview/,
+  );
+  assert.equal(run(...removeArgs, '--yes', '--json').status, 0);
+  assert.equal(await readFile(script, 'utf8'), original);
 });

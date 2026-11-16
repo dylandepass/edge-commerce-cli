@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
-import { CliError, validateSetup } from '../src/config.mjs';
+import { CliError, pdpDefaults, siteDefaults, validateSetup } from '../src/config.mjs';
+import { installedGuidance } from '../src/integration-guide.mjs';
 import {
   applyPlan,
   applyRemoval,
@@ -39,8 +40,8 @@ async function wizard(setup, interactive) {
   if (!interactive) return setup;
 
   const prompts = await import('@clack/prompts');
-  const ask = async (message, initialValue) => {
-    const answer = await prompts.text({ message, initialValue });
+  const ask = async (message, initialValue, defaultValue) => {
+    const answer = await prompts.text({ message, initialValue, defaultValue });
     if (prompts.isCancel(answer)) throw new CliError('CANCELLED', 'Setup cancelled.');
     return answer;
   };
@@ -63,12 +64,30 @@ async function wizard(setup, interactive) {
   setup.version ??= 1;
   setup.site ??= {};
 
-  for (const [key, label] of [
-    ['storeView', 'Store view code'],
-    ['locale', 'Locale (e.g. en-US)'],
+  // A catalog-only PDP has no prices or cart, so cart questions are skipped.
+  const pdpOnly = setup.features.includes('pdp') && !setup.features.includes('cart-checkout');
+  if (pdpOnly && !setup.pdp?.mode) {
+    const mode = await prompts.select({
+      message: 'Product page mode',
+      options: [
+        { label: 'Sell online (prices and add to cart)', value: 'cart' },
+        { label: 'Catalog only (no prices or cart)', value: 'catalog' },
+      ],
+    });
+    if (prompts.isCancel(mode)) throw new CliError('CANCELLED', 'Setup cancelled.');
+    setup.pdp = { ...setup.pdp, mode };
+  }
+  const catalog = setup.pdp?.mode === 'catalog';
+
+  for (const [key, label, fallback] of [
+    ['storeView', 'Cart storage namespace (default: default)', siteDefaults.storeView],
+    ['locale', 'Shopper locale (default: en-US; change for other markets)', siteDefaults.locale],
     ['currency', 'Currency (e.g. USD)'],
   ]) {
-    setup.site[key] ??= await ask(label);
+    if (catalog && key !== 'locale') {
+      continue;
+    }
+    setup.site[key] ??= await ask(label, fallback, fallback);
   }
 
   setup.productSource ??= await ask(
@@ -76,12 +95,7 @@ async function wizard(setup, interactive) {
     setup.features.includes('pdp') ? 'starter-pdp' : 'existing-pdp',
   );
 
-  if (
-    setup.features.includes('pdp') &&
-    !setup.features.includes('cart-checkout') &&
-    !setup.site.cartDestination &&
-    !setup.site.cartBehavior
-  ) {
+  if (pdpOnly && !catalog && !setup.site.cartDestination && !setup.site.cartBehavior) {
     const dest = await ask('Existing cart path (blank to stay on page)');
     if (dest) {
       setup.site.cartDestination = dest;
@@ -90,12 +104,32 @@ async function wizard(setup, interactive) {
     }
   }
 
+  if (setup.features.includes('pdp') && setup.pdp?.previewProxyKey === undefined) {
+    prompts.note(
+      'Branch previews (*.aem.page, *.aem.live) do not serve Product Pipeline pages. With a CORS proxy key, product paths load the page from the main *.aem.network origin. The key is public and visible in browser code.',
+      'PDP preview',
+    );
+    const key = await ask('Preview CORS proxy key (blank to skip)');
+    setup.pdp = { ...setup.pdp };
+    if (key) {
+      setup.pdp.previewProxyKey = key;
+      setup.pdp.previewProductPath ??= await ask(
+        'Product page path segment',
+        pdpDefaults.previewProductPath,
+        pdpDefaults.previewProductPath,
+      );
+    }
+  }
+
   if (setup.features.includes('cart-checkout')) {
     setup.site.country ??= await ask('Checkout country (e.g. US)');
+    prompts.note(
+      'AEM preview/live and localhost use the staging Commerce API; custom domains use production. To override, provide a public api.origin in setup JSON.',
+      'API routing',
+    );
     setup.api ??= {};
 
     for (const [key, label] of [
-      ['origin', 'Commerce API origin (HTTPS)'],
       ['org', 'Commerce API org'],
       ['site', 'Commerce API site'],
     ]) {
@@ -181,13 +215,30 @@ async function runInit(options, mode = 'init') {
   if (interactive && !options.yes) {
     const prompts = await import('@clack/prompts');
     const yes = await prompts.confirm({
-      message: 'Apply this plan? No existing files will be replaced.',
+      message: 'Apply the displayed plan, including any scripts.js integration diff?',
     });
     if (prompts.isCancel(yes) || !yes) throw new CliError('CANCELLED', 'Setup cancelled.');
   }
 
   const result = await applyPlan(plan);
   output(result, options.json);
+  if (
+    mode === 'init' &&
+    interactive &&
+    process.stdout.isTTY &&
+    result.operations.some((op) => op.action === 'add')
+  ) {
+    try {
+      const guide = await installedGuidance({ target: options.target || '.', mode: 'manual' });
+      process.stdout.write(`\n${guide.guidance}\n`);
+    } catch {
+      // Guidance is optional; a read error cannot undo a successful install.
+      process.stdout.write('\nOptional setup blueprint could not be shown.\n');
+    }
+    process.stdout.write(
+      '\nOptional copyable AI prompt: edge-commerce guide --mode ai (run from the storefront directory, or pass --target)\n',
+    );
+  }
 }
 
 const program = new Command();
@@ -203,7 +254,7 @@ program
   .version(JSON.parse(await readFile(new URL('../package.json', import.meta.url))).version)
   .addHelpText(
     'after',
-    '\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n',
+    '\nDefaults: cart storage namespace default; shopper locale en-US (US English).\nAPI routing: *.aem.page, *.aem.live, and localhost use staging; custom domains use production.\nExamples:\n  edge-commerce init --target ./site --dry-run\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --dry-run --json\n  edge-commerce init --target ./site --config ./commerce-setup.json --no-input --yes --json\n  edge-commerce guide --target ./site --mode ai\n',
   );
 program
   .command('init')
@@ -220,7 +271,7 @@ program
   .option('--no-input', 'never prompt')
   .option('--yes', 'accept conflict-free installation plan')
   .option('--json', 'print one JSON result; disables prompts')
-  .action(runInit);
+  .action((options) => runInit(options, 'init'));
 program
   .command('upgrade')
   .description('Preview or apply conflict-free upstream source updates')
@@ -228,7 +279,7 @@ program
   .option('--target <directory>', 'EDS storefront directory (defaults to current directory)')
   .option('--dry-run', 'show changes and diffs without writing')
   .option('--no-input', 'never prompt')
-  .option('--yes', 'apply only files still matching installed hashes')
+  .option('--yes', 'apply unchanged installed files and safe managed PDP hooks')
   .option('--json', 'print one JSON result; disables prompts')
   .action((options) => runInit(options, 'upgrade'));
 program
@@ -247,8 +298,9 @@ program
   .option('--json', 'print one JSON result; disables prompts')
   .action(async (options) => {
     const plan = await planRemoval({ target: options.target, features: options.feature });
-    if (options.dryRun) {
+    if (plan.outcome === 'blocked' || options.dryRun) {
       output(plan, options.json);
+      if (plan.outcome === 'blocked') process.exitCode = 3;
       return;
     }
     const interactive = Boolean(process.stdin.isTTY && options.input !== false && !options.json);
@@ -260,11 +312,22 @@ program
     if (interactive && !options.yes) {
       const prompts = await import('@clack/prompts');
       const yes = await prompts.confirm({
-        message: 'Remove unchanged installed files? Edited files will be preserved.',
+        message:
+          'Remove unchanged installed files and managed PDP hooks? Other edits will be preserved.',
       });
       if (prompts.isCancel(yes) || !yes) throw new CliError('CANCELLED', 'Removal cancelled.');
     }
     output(await applyRemoval(plan), options.json);
+  });
+program
+  .command('guide')
+  .description('Show read-only manual or AI integration guidance for an installed storefront')
+  .option('--target <directory>', 'EDS storefront directory', '.')
+  .option('--mode <manual|ai>', 'manual checklist or copyable AI prompt', 'manual')
+  .option('--json', 'print one machine-readable result; never prompts')
+  .action(async (options) => {
+    const result = await installedGuidance({ target: options.target, mode: options.mode });
+    process.stdout.write(`${options.json ? JSON.stringify(result) : result.guidance}\n`);
   });
 program
   .command('check')

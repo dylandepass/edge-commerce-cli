@@ -47,9 +47,74 @@ const product = (options = []) => ({
   selectedOptions: options,
 });
 
+test('Commerce API uses staging on AEM and local hosts, production on custom domains', async () => {
+  const { load } = await modules();
+  const { createApi, resolveApiOrigin } = await load('api.js');
+  for (const host of [
+    'main--store--org.aem.page',
+    'main--store--org.aem.live',
+    'LOCALHOST',
+    '127.0.0.1',
+    '[::1]',
+    'main--store--org.AEM.PAGE.',
+  ]) {
+    assert.equal(resolveApiOrigin(host), 'https://api-stage.adobecommerce.live');
+  }
+  for (const host of ['www.shop.example', 'staging.example.com', 'main.aem.page.evil.com']) {
+    assert.equal(resolveApiOrigin(host), 'https://api.adobecommerce.live');
+  }
+  assert.equal(
+    resolveApiOrigin('www.shop.example', 'https://api-stage.adobecommerce.live'),
+    'https://api-stage.adobecommerce.live',
+  );
+  assert.throws(() => resolveApiOrigin(), /Storefront hostname is required/);
+
+  const requests = [];
+  const fetcher = async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => ({}) };
+  };
+  const apiSettings = { api: { org: 'example', site: 'shop' } };
+  await createApi({ settings: apiSettings, hostname: 'main--shop--org.aem.page', fetcher }).order(
+    'buyer@example.com',
+    'one',
+  );
+  await createApi({ settings: apiSettings, hostname: 'www.shop.example', fetcher }).order(
+    'buyer@example.com',
+    'two',
+  );
+  assert.match(requests[0], /^https:\/\/api-stage\.adobecommerce\.live\/example\/sites\/shop\//);
+  assert.match(requests[1], /^https:\/\/api\.adobecommerce\.live\/example\/sites\/shop\//);
+  assert.throws(() => createApi({ settings: apiSettings, hostname: '', fetcher }), /hostname/);
+
+  const hadLocation = Object.hasOwn(globalThis, 'location');
+  const previousLocation = globalThis.location;
+  globalThis.location = { hostname: 'localhost' };
+  try {
+    await createApi({ settings: apiSettings, fetcher }).order('buyer@example.com', 'local');
+  } finally {
+    if (hadLocation) globalThis.location = previousLocation;
+    else delete globalThis.location;
+  }
+  assert.match(requests[2], /^https:\/\/api-stage\.adobecommerce\.live\/example\/sites\/shop\//);
+
+  const legacy = createApi({ hostname: 'www.shop.example', fetcher });
+  await legacy.order('buyer@example.com', 'three');
+  assert.match(requests[3], /^https:\/\/api\.example\.com\/org\/sites\/store\//);
+
+  const override = createApi({
+    settings: { api: { origin: 'https://custom-stage.example/', org: 'example', site: 'shop' } },
+    hostname: 'www.shop.example',
+    fetcher,
+  });
+  await override.order('buyer@example.com', 'four');
+  assert.match(requests[4], /^https:\/\/custom-stage\.example\/example\/sites\/shop\//);
+});
+
 test('cart keeps selected variants separate, rebases mutations, and projects only API fields', async () => {
   const { load } = await modules();
-  const { createCart, lineId } = await load('cart.js');
+  const { createCart, lineId, toOrderItems } = await load('cart.js');
+  const { productToCartItem } = await load('product-to-cart.js');
   const storage = store();
   const first = createCart({ storage });
   const second = createCart({ storage });
@@ -77,6 +142,108 @@ test('cart keeps selected variants separate, rebases mutations, and projects onl
   );
   assert.equal(createCart({ storage: corrupted }).count, 0);
   assert.doesNotThrow(() => first.add({ ...product(), price: { final: '0', currency: 'USD' } }));
+  for (const price of [{ final: '25.00' }, { final: '25.00', currency: 'SGD' }]) {
+    assert.throws(() => first.add({ ...product(), price }), /Invalid cart item/);
+    assert.throws(() => toOrderItems([{ ...product(), price }], 'USD'), /Invalid cart item/);
+    assert.throws(() => productToCartItem({ ...product(), price }), /USD offers/);
+  }
+  const legacy = store();
+  legacy.setItem(
+    'edge-commerce:cart:v1:en',
+    JSON.stringify({
+      version: 1,
+      items: [
+        product(),
+        { ...product(), sku: 'no-currency', price: { final: '9' } },
+        { ...product(), sku: 'sgd', price: { final: '10', currency: 'SGD' } },
+      ],
+    }),
+  );
+  const restored = createCart({ storage: legacy });
+  assert.equal(restored.count, 1);
+  assert.deepEqual(restored.getOrderItems()[0].price, { final: '25.00', currency: 'USD' });
+  restored.add(product());
+  assert.equal(JSON.parse(legacy.getItem('edge-commerce:cart:v1:en')).items.length, 1);
+});
+
+test('JSON-LD adapter maps the selected offer without copying heavy product metadata', async () => {
+  const { load } = await modules();
+  const { mapJsonLdOffer } = await load('jsonld-adapter.js');
+  const { productToCartItem } = await load('product-to-cart.js');
+  const jsonld = {
+    sku: 'parent',
+    name: 'Product',
+    image: ['data:image/png;base64,not-needed', { contentUrl: '/media/product.webp' }],
+    custom: { inspection: Array(100).fill({ name: 'Check' }) },
+    offers: [
+      { sku: 'red', price: '10', priceCurrency: 'USD' },
+      {
+        sku: 'blue',
+        name: 'Blue',
+        price: '12',
+        priceCurrency: 'USD',
+        availability: 'https://schema.org/InStock',
+        image: 'data:bad',
+      },
+    ],
+  };
+  const mapped = mapJsonLdOffer(jsonld, jsonld.offers[1], {
+    path: '/products/product',
+    baseUrl: 'https://store.example.com/products/product',
+  });
+  assert.deepEqual(mapped, {
+    sku: 'blue',
+    path: '/products/product',
+    name: 'Blue',
+    price: { final: '12', currency: 'USD' },
+    imageUrl: 'https://store.example.com/media/product.webp',
+    productUrl: '/products/product',
+  });
+  assert.equal('custom' in productToCartItem(mapped), false);
+  assert.throws(() => mapJsonLdOffer(jsonld, undefined, { path: '/products/product' }), /Select/);
+});
+
+test('JSON-LD adapter refuses unsupported currencies, unavailable or incomplete offers', async () => {
+  const { load } = await modules();
+  const { mapJsonLdOffer } = await load('jsonld-adapter.js');
+  const productJsonLd = {
+    sku: 'fallback',
+    name: 'Product',
+    offers: {
+      price: '0',
+      priceCurrency: 'USD',
+      availability: 'InStock',
+    },
+  };
+  const options = { path: '/products/product' };
+  assert.equal(mapJsonLdOffer(productJsonLd, undefined, options).sku, 'fallback');
+  assert.equal(mapJsonLdOffer(productJsonLd, undefined, options).price.final, '0');
+  for (const offer of [{ price: '10', priceCurrency: 'SGD' }, { price: '10' }]) {
+    assert.throws(() => mapJsonLdOffer(productJsonLd, offer, options), /USD offers/);
+  }
+  for (const offer of [
+    { price: 'NaN', priceCurrency: 'USD' },
+    { price: '', priceCurrency: 'USD' },
+  ]) {
+    assert.throws(() => mapJsonLdOffer(productJsonLd, offer, options), /source-backed/);
+  }
+  assert.throws(
+    () =>
+      mapJsonLdOffer(
+        productJsonLd,
+        {
+          price: '10',
+          priceCurrency: 'USD',
+          availability: 'https://schema.org/OutOfStock',
+        },
+        options,
+      ),
+    /not in stock/,
+  );
+  assert.throws(
+    () => mapJsonLdOffer(productJsonLd, undefined, { path: '//evil.example/p' }),
+    /source-backed/,
+  );
 });
 
 test('standard flow previews exact order, reuses idempotency key on retry, and never treats approval as completion', async () => {
@@ -299,4 +466,126 @@ test('review retries same confirm key; pending and lookup failure cannot show su
   assert.deepEqual(keys, ['one-key', 'one-key']);
   assert.equal(await flow.cancel('one'), 'cancelled');
   assert.equal(cleared, 1);
+});
+
+test('express flow carries the PayPal session capability end to end', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const calls = [];
+  const api = {
+    createSession: async () => ({ paypalOrderId: 'pp-1', sessionToken: 'cap-1' }),
+    patchSession: async (id, payload, token) => {
+      calls.push(['patch', payload.type, token]);
+      return { shippingMethods: [{ id: 'standard' }] };
+    },
+    preview: async () => ({ estimateToken: 'token' }),
+    getSession: async (id, country, locale, token) => {
+      calls.push(['get', token]);
+      return {
+        payer: { email: 'p@example.com', firstName: 'P', lastName: 'B' },
+        shippingAddress: { address1: 'Main', city: 'LA', state: 'CA', zip: '90001', country: 'us' },
+        selectedOptionId: 'standard',
+      };
+    },
+    createOrder: async () => ({ order: { id: 'one' } }),
+    initiate: async (id, body) => {
+      calls.push(['initiate', body.paypalOrderId, body.paypalSessionToken]);
+      return { action: 'review' };
+    },
+  };
+  const storage = store();
+  const flow = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await flow.start();
+  assert.equal(JSON.parse(storage.getItem('edge-commerce:express-session')).sessionToken, 'cap-1');
+  await flow.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  await flow.setShippingOption('standard');
+  await flow.approve('pp-1');
+  assert.deepEqual(calls, [
+    ['patch', 'address', 'cap-1'],
+    ['patch', 'option', 'cap-1'],
+    ['get', 'cap-1'],
+    ['initiate', 'pp-1', 'cap-1'],
+  ]);
+});
+
+test('a resumed express flow keeps using the persisted capability', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const tokens = [];
+  const api = {
+    createSession: async () => ({ paypalOrderId: 'pp-1', sessionToken: 'cap-1' }),
+    patchSession: async () => ({ shippingMethods: [{ id: 'standard' }] }),
+    preview: async () => ({ estimateToken: 'token' }),
+    getSession: async (id, country, locale, token) => {
+      tokens.push(token);
+      return {
+        payer: { email: 'p@example.com', firstName: 'P', lastName: 'B' },
+        shippingAddress: { address1: 'Main', city: 'LA', state: 'CA', zip: '90001', country: 'us' },
+        selectedOptionId: 'standard',
+      };
+    },
+    createOrder: async () => ({ order: { id: 'one' } }),
+    initiate: async (id, body) => {
+      tokens.push(body.paypalSessionToken);
+      return { action: 'review' };
+    },
+  };
+  const storage = store();
+  const first = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await first.start();
+  await first.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  const resumed = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await resumed.approve('pp-1');
+  assert.deepEqual(tokens, ['cap-1', 'cap-1']);
+});
+
+test('restored draft without sessionToken sends no token', async () => {
+  const { load } = await modules();
+  const { createCart } = await load('cart.js');
+  const { createExpressFlow } = await load('checkout-flow.js');
+  const cart = createCart({ storage: store() });
+  cart.add(product());
+  const storage = store();
+  storage.setItem('edge-commerce:express-session', JSON.stringify({ sessionId: 'pp-old' }));
+  const seen = [];
+  const api = {
+    patchSession: async (id, payload, token) => {
+      seen.push(token);
+      return { shippingMethods: [{ id: 'standard' }] };
+    },
+    preview: async () => ({ estimateToken: 'token' }),
+  };
+  const flow = createExpressFlow({ api, cart, storage, id: () => 'key' });
+  await flow.setAddress({ countryCode: 'US', state: 'CA', postalCode: '90001' });
+  assert.deepEqual(seen, [undefined]);
+});
+
+test('api sends x-paypal-session only when a token is given', async () => {
+  const { load } = await modules();
+  const { createApi } = await load('api.js');
+  const seen = [];
+  const fetcher = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const api = createApi({
+    fetcher,
+    settings: { api: { origin: 'https://api.example.com', org: 'o', site: 's' } },
+  });
+  await api.patchSession('pp-1', { type: 'option' }, 'cap-1');
+  await api.patchSession('pp-1', { type: 'option' });
+  await api.getSession('pp-1', 'us', 'en-US', 'cap-1');
+  await api.getSession('pp-1', 'us', 'en-US');
+  assert.equal(seen[0].headers['x-paypal-session'], 'cap-1');
+  assert.equal(seen[0].headers['Content-Type'], 'application/json');
+  assert.equal('x-paypal-session' in seen[1].headers, false);
+  assert.equal(seen[2].headers['x-paypal-session'], 'cap-1');
+  assert.ok(!seen[2].url.includes('cap-1'));
+  assert.equal('x-paypal-session' in seen[3].headers, false);
 });
