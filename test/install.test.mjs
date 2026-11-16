@@ -288,3 +288,73 @@ test('public config edits remain untouched and check reports changes', async () 
   assert.equal(plan.outcome, 'blocked');
   assert.equal(await readFile(file, 'utf8'), '// customer config');
 });
+
+test('PDP setup validates catalog mode and public preview settings', () => {
+  const pdpOnly = (pdp, site = { locale: 'en-GB' }) =>
+    validateSetup({ version: 1, features: ['pdp'], productSource: 'starter-pdp', site, pdp });
+  const catalog = pdpOnly({ mode: 'catalog' });
+  assert.deepEqual(catalog.pdp, { mode: 'catalog' });
+  assert.equal(catalog.site.currency, undefined);
+  assert.deepEqual(pdpOnly({ mode: 'catalog', previewProxyKey: 'public-key-123' }).pdp, {
+    mode: 'catalog',
+    previewProxyKey: 'public-key-123',
+    previewProductPath: '/products/',
+  });
+  assert.deepEqual(valid({ features: ['cart-checkout', 'pdp'] }).pdp, { mode: 'cart' });
+  assert.equal(valid().pdp, undefined);
+  for (const [input, field] of [
+    [{ pdp: { mode: 'catalog' } }, 'pdp'],
+    [{ features: ['cart-checkout', 'pdp'], pdp: { mode: 'catalog' } }, 'pdp.mode'],
+    [{ features: ['cart-checkout', 'pdp'], pdp: { mode: 'shop' } }, 'pdp.mode'],
+    [
+      { features: ['cart-checkout', 'pdp'], pdp: { previewProxyKey: 'short' } },
+      'pdp.previewProxyKey',
+    ],
+    [
+      { features: ['cart-checkout', 'pdp'], pdp: { previewProductPath: '/p/' } },
+      'pdp.previewProductPath',
+    ],
+    [
+      {
+        features: ['cart-checkout', 'pdp'],
+        pdp: { previewProxyKey: 'public-key-123', previewProductPath: 'products' },
+      },
+      'pdp.previewProductPath',
+    ],
+    [{ features: ['cart-checkout', 'pdp'], pdp: { theme: 'dark' } }, 'pdp.theme'],
+  ]) {
+    assert.throws(
+      () => valid(input),
+      (error) => error.code === 'INVALID_INPUT' && error.fields.some((f) => f.path === field),
+    );
+  }
+  assert.throws(
+    () => pdpOnly({ mode: 'cart' }, { cartBehavior: 'stay' }),
+    (error) => error.fields.some((f) => f.path === 'site.currency'),
+  );
+});
+
+test('catalog-only PDP skips the cart core and generates its PDP config', async () => {
+  const { templates, target } = await fixture();
+  const setup = validateSetup({
+    version: 1,
+    features: ['pdp'],
+    productSource: 'starter-pdp',
+    site: {},
+    pdp: { mode: 'catalog', previewProxyKey: 'public-key-123' },
+  });
+  const plan = await planInstall({ templates, target, setup });
+  assert.deepEqual(
+    plan.operations.map((op) => op.path),
+    ['blocks/pdp/pdp.js', 'scripts/commerce/pdp-config.js', 'scripts/commerce/site-config.js'],
+  );
+  await applyPlan(plan);
+  const config = await readFile(path.join(target, 'scripts/commerce/pdp-config.js'), 'utf8');
+  assert.match(config, /"mode": "catalog"/);
+  assert.match(config, /"proxyKey": "public-key-123"/);
+  assert.match(config, /"productPath": "\/products\/"/);
+  assert.deepEqual((await checkInstall({ target })).features, ['pdp']);
+  await applyRemoval(await planRemoval({ target, features: ['pdp'] }));
+  await assert.rejects(readFile(path.join(target, 'scripts/commerce/site-config.js')));
+  await assert.rejects(readFile(path.join(target, 'scripts/commerce/pdp-config.js')));
+});

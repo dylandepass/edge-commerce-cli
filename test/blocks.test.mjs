@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -9,37 +9,33 @@ import { validateSetup } from '../src/config.mjs';
 import { planInstall, applyPlan } from '../src/install.mjs';
 
 const templates = fileURLToPath(new URL('../template/', import.meta.url));
-async function installed(paypalClientId = 'none') {
+const checkoutSetup = (paypalClientId) => ({
+  version: 1,
+  features: ['cart-checkout', 'pdp'],
+  productSource: 'starter-pdp',
+  site: {
+    storeView: 'en',
+    locale: 'en-US',
+    currency: 'USD',
+    country: 'US',
+    cartBehavior: 'stay',
+  },
+  api: { origin: 'https://api.example.com', org: 'example', site: 'store' },
+  routes: {
+    cart: '/cart',
+    checkout: '/checkout',
+    review: '/review',
+    complete: '/complete',
+    cancel: '/cancel',
+  },
+  paypal: { clientId: paypalClientId },
+});
+async function installed(paypalClientId = 'none', setup = checkoutSetup(paypalClientId)) {
   const target = await mkdtemp(path.join(tmpdir(), 'edge-block-'));
   await writeFile(path.join(target, 'package.json'), '{"type":"module"}');
-  await applyPlan(
-    await planInstall({
-      templates,
-      target,
-      setup: validateSetup({
-        version: 1,
-        features: ['cart-checkout', 'pdp'],
-        productSource: 'starter-pdp',
-        site: {
-          storeView: 'en',
-          locale: 'en-US',
-          currency: 'USD',
-          country: 'US',
-          cartBehavior: 'stay',
-        },
-        api: { origin: 'https://api.example.com', org: 'example', site: 'store' },
-        routes: {
-          cart: '/cart',
-          checkout: '/checkout',
-          review: '/review',
-          complete: '/complete',
-          cancel: '/cancel',
-        },
-        paypal: { clientId: paypalClientId },
-      }),
-    }),
-  );
+  await applyPlan(await planInstall({ templates, target, setup: validateSetup(setup) }));
   const load = (relative) => import(pathToFileURL(path.join(target, relative)).href);
+  load.target = target;
   load.widget = async (name) => {
     const widget = document.createElement('div');
     widget.className = name;
@@ -48,83 +44,218 @@ async function installed(paypalClientId = 'none') {
   };
   return load;
 }
-function browser(url = 'https://store.example.com/products/example') {
-  const dom = new JSDOM('<main><div class="pdp"><div><div>PDP</div></div></div></main>', { url });
+function browser(
+  url = 'https://store.example.com/products/example',
+  html = '<main><div class="pdp"><div><div>PDP</div></div></div></main>',
+) {
+  const dom = new JSDOM(html, { url });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.location = dom.window.location;
   globalThis.localStorage = dom.window.localStorage;
   globalThis.sessionStorage = dom.window.sessionStorage;
   globalThis.CustomEvent = dom.window.CustomEvent;
+  globalThis.DOMParser = dom.window.DOMParser;
   return dom;
 }
 const response = (value, ok = true) => ({ ok, json: async () => value });
 
-test('PDP only renders catalog-backed offer and requires a selected variant', async () => {
-  const dom = browser();
-  const load = await installed();
+// A Product Pipeline page: SKU meta, Product JSON-LD and the rendered summary.
+function pipelineHtml(product) {
+  return `<html><head><meta name="sku" content="${product.sku}">
+    <script type="application/ld+json">${JSON.stringify(product)}</script></head>
+    <body><main>
+      <div><h1>${product.name}</h1><p>$12</p>
+        <p><picture><img src="./media_1.jpg" alt="Product"></picture></p>
+        <p><picture><img src="./media_2.jpg" alt="Detail"></picture></p></div>
+      <div><p>Description</p></div>
+      <div class="section" data-sku="red"><h2>Red</h2></div>
+    </main></body></html>`;
+}
+function offer(sku, price, availability) {
+  return {
+    '@type': 'Offer',
+    sku,
+    name: sku,
+    price,
+    priceCurrency: 'USD',
+    ...(availability ? { availability: `https://schema.org/${availability}` } : {}),
+  };
+}
+const noFetch = async () => {
+  throw new Error('The PDP must not fetch product data');
+};
+async function pipelinePdp(load, product) {
+  const { buildPDPBlock } = await load('scripts/commerce/pdp-page.js');
+  buildPDPBlock(document.querySelector('main'));
   const block = document.querySelector('.pdp');
-  globalThis.fetch = async () =>
-    response({
-      sku: 'parent',
-      name: 'Product',
-      price: { final: '10', currency: 'USD' },
-      variants: [
-        {
-          sku: 'red',
-          name: 'Red',
-          price: { final: '12', currency: 'USD' },
-          availability: 'InStock',
-        },
-        {
-          sku: 'blue',
-          name: 'Blue',
-          price: { final: '13', currency: 'USD' },
-          availability: 'OutOfStock',
-        },
-        { sku: 'unknown', name: 'Unknown', price: { final: '13', currency: 'USD' } },
-        {
-          sku: 'bad-price',
-          name: 'Bad price',
-          price: { final: 'NaN', currency: 'USD' },
-          availability: 'InStock',
-        },
-      ],
-    });
   const { default: decorate } = await load('blocks/pdp/pdp.js');
   await decorate(block);
+  return block;
+}
+
+test('PDP reads the page JSON-LD and requires a selected in-stock variant', async () => {
+  const product = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    sku: 'parent',
+    name: 'Product',
+    offers: [
+      offer('red', '12', 'InStock'),
+      offer('blue', '13', 'OutOfStock'),
+      offer('unknown', '13'),
+      offer('bad-price', 'NaN', 'InStock'),
+    ],
+  };
+  const dom = browser(undefined, pipelineHtml(product));
+  const load = await installed();
+  globalThis.fetch = noFetch;
+  const block = await pipelinePdp(load, product);
+
+  assert.equal(block.querySelectorAll('h1').length, 1);
+  assert.equal(block.querySelector('.pdp-media picture img').loading, 'eager');
+  assert.equal(block.querySelectorAll('.pdp-media picture').length, 2);
+  assert(!block.textContent.includes('$12'), 'the pipeline price is replaced');
+  assert.equal(document.querySelector('[data-sku]'), null, 'variant sections are removed');
+  assert.match(document.querySelector('main').textContent, /Description/);
+
   const select = block.querySelector('select');
   const button = block.querySelector('button');
   assert.equal(button.disabled, true);
   select.value = '0';
   select.dispatchEvent(new dom.window.Event('change'));
   assert.equal(button.disabled, false);
+  assert.match(block.querySelector('.pdp-price').textContent, /\$12\.00/);
   button.click();
   assert.match(block.textContent, /Added to cart/);
   assert.equal(localStorage.length, 1);
-  select.value = '1';
-  select.dispatchEvent(new dom.window.Event('change'));
-  assert.equal(button.disabled, true);
-  select.value = '2';
-  select.dispatchEvent(new dom.window.Event('change'));
-  assert.equal(button.disabled, true);
-  select.value = '3';
-  select.dispatchEvent(new dom.window.Event('change'));
-  assert.equal(button.disabled, true);
+  for (const value of ['1', '2', '3']) {
+    select.value = value;
+    select.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(button.disabled, true);
+  }
   dom.window.close();
 });
 
 test('PDP refuses missing/unavailable product instead of making up price or inventory', async () => {
-  const dom = browser();
+  const product = {
+    '@type': 'Product',
+    sku: 'p',
+    name: 'No price',
+    offers: { '@type': 'Offer', availability: 'https://schema.org/OutOfStock' },
+  };
+  const dom = browser(undefined, pipelineHtml(product));
   const load = await installed();
-  globalThis.fetch = async () =>
-    response({ sku: 'p', name: 'No price', availability: 'OutOfStock' });
-  const { default: decorate } = await load('blocks/pdp/pdp.js');
-  const block = document.querySelector('.pdp');
-  await decorate(block);
+  globalThis.fetch = noFetch;
+  const block = await pipelinePdp(load, product);
   assert.equal(block.querySelector('button').disabled, true);
   assert(!block.textContent.includes('$'));
   dom.window.close();
+});
+
+test('catalog PDP shows no price or cart and installs no cart core', async () => {
+  const product = {
+    '@type': 'Product',
+    sku: 'engine',
+    name: 'Engine',
+    offers: [offer('engine', '99', 'InStock')],
+  };
+  const dom = browser(undefined, pipelineHtml(product));
+  const load = await installed(undefined, {
+    version: 1,
+    features: ['pdp'],
+    productSource: 'starter-pdp',
+    site: { locale: 'en-GB' },
+    pdp: { mode: 'catalog' },
+  });
+  globalThis.fetch = noFetch;
+  await assert.rejects(access(path.join(load.target, 'scripts/commerce/cart.js')));
+  const block = await pipelinePdp(load, product);
+  assert.equal(block.querySelector('h1').textContent, 'Engine');
+  assert.equal(block.querySelectorAll('picture').length, 2);
+  assert.equal(block.querySelector('select, button, input, .pdp-price'), null);
+  assert(!block.textContent.includes('$'));
+  dom.window.close();
+});
+
+test('the PDP auto-block only wraps the document main of a pipeline page', async () => {
+  const product = { '@type': 'Product', sku: 'p', name: 'Product', offers: [] };
+  const load = await installed();
+  const { buildPDPBlock, findProduct } = await load('scripts/commerce/pdp-page.js');
+
+  let dom = browser(undefined, pipelineHtml(product).replace(/<meta name="sku"[^>]*>/, ''));
+  buildPDPBlock(document.querySelector('main'));
+  assert.equal(document.querySelector('.pdp'), null, 'no SKU meta, no block');
+  dom.window.close();
+
+  dom = browser(undefined, pipelineHtml(product));
+  const fragment = document.createElement('main');
+  fragment.innerHTML = '<div><h1>Fragment</h1></div>';
+  buildPDPBlock(fragment);
+  assert.equal(fragment.querySelector('.pdp'), null, 'fragments are not product pages');
+  buildPDPBlock(document.querySelector('main'));
+  buildPDPBlock(document.querySelector('main'));
+  assert.equal(document.querySelectorAll('.pdp').length, 1);
+  dom.window.close();
+
+  assert.equal(findProduct({ '@graph': [{ '@type': 'BreadcrumbList' }, product] }), product);
+  assert.equal(findProduct([{ '@type': ['Thing', 'Product'], sku: 'x' }]).sku, 'x');
+  assert.equal(findProduct({ '@type': 'Organization' }), null);
+});
+
+test('branch previews load the pipeline page through the configured CORS proxy', async () => {
+  const product = { '@type': 'Product', sku: 'p', name: 'Product', offers: [] };
+  const previewSetup = {
+    version: 1,
+    features: ['pdp'],
+    productSource: 'starter-pdp',
+    site: {},
+    pdp: { mode: 'catalog', previewProxyKey: 'public-key-123', previewProductPath: '/products/' },
+  };
+  const load = await installed(undefined, previewSetup);
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(url);
+    return { ok: true, text: async () => pipelineHtml(product) };
+  };
+
+  const dom = browser(
+    'https://feature--site--org.aem.page/en/products/example',
+    '<html><head></head><body><main><div><p>authored</p></div></main></body></html>',
+  );
+  const { loadPDPPreview } = await load('scripts/commerce/pdp-page.js');
+  assert.equal(await loadPDPPreview(), true);
+  const proxied = new URL(requests[0]);
+  assert.equal(proxied.origin, 'https://fcors.org');
+  assert.equal(
+    proxied.searchParams.get('url'),
+    'https://main--site--org.aem.network/en/products/example',
+  );
+  assert.equal(proxied.searchParams.get('key'), 'public-key-123');
+  assert(document.querySelector('meta[name="sku"]'));
+  assert.equal(
+    document.querySelector('main img').getAttribute('src'),
+    'https://main--site--org.aem.network/en/products/media_1.jpg',
+  );
+  assert.match(document.querySelector('main').lastElementChild.textContent, /authored/);
+  dom.window.close();
+
+  for (const url of [
+    'https://www.example.com/en/products/example',
+    'https://feature--site--org.aem.page/en/about',
+  ]) {
+    const other = browser(url, '<main><div><p>page</p></div></main>');
+    assert.equal(await loadPDPPreview(), false);
+    other.window.close();
+  }
+  assert.equal(requests.length, 1);
+
+  const withoutKey = await installed();
+  const plain = browser('https://feature--site--org.aem.page/en/products/example');
+  const { loadPDPPreview: disabled } = await withoutKey('scripts/commerce/pdp-page.js');
+  assert.equal(await disabled(), false);
+  assert.equal(requests.length, 1);
+  plain.window.close();
 });
 
 test('checkout restores tab-scoped form without declaring payment success', async () => {

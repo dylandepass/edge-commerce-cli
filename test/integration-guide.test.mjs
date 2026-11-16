@@ -6,11 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateSetup } from '../src/config.mjs';
 import { applyPlan, planInstall } from '../src/install.mjs';
-import {
-  installedGuidance,
-  integrationGuidance,
-  postInstallChoice,
-} from '../src/integration-guide.mjs';
+import { installedGuidance, integrationGuidance } from '../src/integration-guide.mjs';
 
 const templates = fileURLToPath(new URL('../template/', import.meta.url));
 const version = JSON.parse(await readFile(new URL('../package.json', import.meta.url))).version;
@@ -42,14 +38,44 @@ test('manual and AI guidance use public routes, never payment or model tokens', 
   const manual = integrationGuidance({ ...options, mode: 'manual' });
   const ai = integrationGuidance({ ...options, mode: 'ai' });
   for (const text of [manual, ai]) {
-    assert.match(text, /\/bag: \/widgets\/cart\/cart\.html/);
-    assert.match(text, /\/payment: \/widgets\/checkout\/checkout\.html/);
+    for (const [route, widget] of [
+      ['/bag', '/widgets/cart/cart.html'],
+      ['/payment', '/widgets/checkout/checkout.html'],
+      ['/order/review', '/widgets/order-review/order-review.html'],
+      ['/order/complete', '/widgets/order-complete/order-complete.html'],
+      ['/order/cancel', '/widgets/order-cancel/order-cancel.html'],
+    ]) {
+      assert(text.includes(`- ${route}: ${widget}`));
+    }
     assert.match(text, /USD/);
     assert.doesNotMatch(text, /clientId|PUBLIC_CLIENT_ID|api\.origin/);
   }
   assert.match(ai, /Stop and wait for my approval/);
+  assert.match(ai, /Git remote and current branch without echoing credentials/);
+  assert.match(ai, /verify it read-only/);
+  assert.match(ai, /missing widget asset.*code has not been synced yet/);
+  assert.match(ai, /window\.hlx\.codeBasePath/);
+  assert.match(ai, /configured nav metadata\/path and fallback \(commonly \/nav\)/);
+  assert.match(ai, /configured routes\.cart as a root-relative fallback/);
+  assert.match(ai, /do not ask me for an origin or invent a working URL/);
+  assert.match(ai, /Do not ask me where the nav source lives/);
+  assert.match(ai, /Authored page blueprint \(content pages, not new code files\)/);
+  assert.match(ai, /one standalone paragraph with a normal link/);
+  assert.match(ai, /Do not assume pages are managed in DA or ask me whether they are/);
+  assert.match(ai, /do not ask me for preview URLs/);
+  assert.match(ai, /A page returning 200 does not prove its widget asset is synced/);
+  assert.doesNotMatch(ai, /ask for the code origin if it is unknown/);
   assert.match(ai, /Do not open \.env files/);
   assert.match(ai, /Do not commit, push, publish pages/);
+  assert.match(manual, /Code already copied: see \.edge-commerce\/manifest\.json/);
+  assert.match(manual, /Authored page blueprint \(content pages, not new repository code files\)/);
+  assert.match(manual, /Each page needs one standalone paragraph/);
+  assert.match(
+    manual,
+    /<p><a href="\{verified-code-origin\}\/widgets\/cart\/cart\.html">Cart<\/a><\/p>/,
+  );
+  assert.match(manual, /never publish it as-is/);
+  assert.match(manual, /Do not assume DA or request preview URLs/);
   assert.match(manual, /Commerce API and PayPal review/);
   assert.doesNotMatch(manual, /Stop and wait/);
 });
@@ -71,20 +97,44 @@ test('PDP-only guidance stays independent of checkout and rejects unsafe route t
   });
 });
 
-test('post-install choice is optional and cancellation does not fail an applied install', async () => {
-  for (const choice of ['manual', 'ai', 'later', Symbol('cancel')]) {
-    const prompts = {
-      select: async ({ options }) => {
-        assert.deepEqual(
-          options.map((entry) => entry.value),
-          ['manual', 'ai', 'later'],
-        );
-        return choice;
-      },
-      isCancel: (answer) => typeof answer === 'symbol',
-    };
-    assert.equal(await postInstallChoice(prompts), typeof choice === 'symbol' ? 'later' : choice);
-  }
+test('PDP guidance covers page hooks, previews and catalog mode without echoing the proxy key', async () => {
+  const cart = integrationGuidance({ features: ['pdp'], currency: 'EUR', mode: 'manual' });
+  assert.match(cart, /buildPDPBlock\(main\) first in buildAutoBlocks/);
+  assert.match(cart, /await loadPDPPreview\(\) first in loadEager/);
+  assert.match(cart, /does not fetch product JSON/);
+  assert.match(cart, /do not serve Product Pipeline pages/);
+  assert.match(
+    cart,
+    /AEM_PAGES_URL \(or --url\) set to https:\/\/main--\{repo\}--\{owner\}\.aem\.network/,
+  );
+  assert.match(cart, /index\.plain\.html/);
+  assert.match(cart, /Only add offers priced in EUR/);
+  assert.doesNotMatch(cart, /Catalog-only mode/);
+
+  const catalog = integrationGuidance({
+    features: ['pdp'],
+    pdpMode: 'catalog',
+    pdpPreview: true,
+    mode: 'ai',
+  });
+  assert.match(catalog, /PDP block is installed/);
+  assert.match(catalog, /Catalog-only mode/);
+  assert.match(catalog, /through the CORS proxy configured/);
+  assert.doesNotMatch(catalog, /cart currency|Only add offers|widget links/);
+
+  const target = await mkdtemp(path.join(tmpdir(), 'edge-guide-pdp-'));
+  const setup = validateSetup({
+    version: 1,
+    features: ['pdp'],
+    productSource: 'starter-pdp',
+    site: {},
+    pdp: { mode: 'catalog', previewProxyKey: 'public-key-123' },
+  });
+  await applyPlan(await planInstall({ templates, target, setup }));
+  const installed = await installedGuidance({ target, mode: 'ai' });
+  assert.match(installed.guidance, /Catalog-only mode/);
+  assert.match(installed.guidance, /through the CORS proxy configured/);
+  assert.doesNotMatch(installed.guidance, /public-key-123/);
 });
 
 test('read-only guide uses safe generated public config and ignores edited secret data', async () => {

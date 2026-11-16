@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
-import { CliError, siteDefaults, validateSetup } from '../src/config.mjs';
-import { installedGuidance, postInstallChoice } from '../src/integration-guide.mjs';
+import { CliError, pdpDefaults, siteDefaults, validateSetup } from '../src/config.mjs';
+import { installedGuidance } from '../src/integration-guide.mjs';
 import {
   applyPlan,
   applyRemoval,
@@ -64,11 +64,29 @@ async function wizard(setup, interactive) {
   setup.version ??= 1;
   setup.site ??= {};
 
+  // A catalog-only PDP has no prices or cart, so cart questions are skipped.
+  const pdpOnly = setup.features.includes('pdp') && !setup.features.includes('cart-checkout');
+  if (pdpOnly && !setup.pdp?.mode) {
+    const mode = await prompts.select({
+      message: 'Product page mode',
+      options: [
+        { label: 'Sell online (prices and add to cart)', value: 'cart' },
+        { label: 'Catalog only (no prices or cart)', value: 'catalog' },
+      ],
+    });
+    if (prompts.isCancel(mode)) throw new CliError('CANCELLED', 'Setup cancelled.');
+    setup.pdp = { ...setup.pdp, mode };
+  }
+  const catalog = setup.pdp?.mode === 'catalog';
+
   for (const [key, label, fallback] of [
     ['storeView', 'Cart storage namespace (default: default)', siteDefaults.storeView],
     ['locale', 'Shopper locale (default: en-US; change for other markets)', siteDefaults.locale],
     ['currency', 'Currency (e.g. USD)'],
   ]) {
+    if (catalog && key !== 'locale') {
+      continue;
+    }
     setup.site[key] ??= await ask(label, fallback, fallback);
   }
 
@@ -77,17 +95,29 @@ async function wizard(setup, interactive) {
     setup.features.includes('pdp') ? 'starter-pdp' : 'existing-pdp',
   );
 
-  if (
-    setup.features.includes('pdp') &&
-    !setup.features.includes('cart-checkout') &&
-    !setup.site.cartDestination &&
-    !setup.site.cartBehavior
-  ) {
+  if (pdpOnly && !catalog && !setup.site.cartDestination && !setup.site.cartBehavior) {
     const dest = await ask('Existing cart path (blank to stay on page)');
     if (dest) {
       setup.site.cartDestination = dest;
     } else {
       setup.site.cartBehavior = 'stay';
+    }
+  }
+
+  if (setup.features.includes('pdp') && setup.pdp?.previewProxyKey === undefined) {
+    prompts.note(
+      'Branch previews (*.aem.page, *.aem.live) do not serve Product Pipeline pages. With a CORS proxy key, product paths load the page from the main *.aem.network origin. The key is public and visible in browser code.',
+      'PDP preview',
+    );
+    const key = await ask('Preview CORS proxy key (blank to skip)');
+    setup.pdp = { ...setup.pdp };
+    if (key) {
+      setup.pdp.previewProxyKey = key;
+      setup.pdp.previewProductPath ??= await ask(
+        'Product page path segment',
+        pdpDefaults.previewProductPath,
+        pdpDefaults.previewProductPath,
+      );
     }
   }
 
@@ -185,7 +215,7 @@ async function runInit(options, mode = 'init') {
   if (interactive && !options.yes) {
     const prompts = await import('@clack/prompts');
     const yes = await prompts.confirm({
-      message: 'Apply this plan? No existing files will be replaced.',
+      message: 'Apply the displayed plan, including any scripts.js integration diff?',
     });
     if (prompts.isCancel(yes) || !yes) throw new CliError('CANCELLED', 'Setup cancelled.');
   }
@@ -199,18 +229,14 @@ async function runInit(options, mode = 'init') {
     result.operations.some((op) => op.action === 'add')
   ) {
     try {
-      const prompts = await import('@clack/prompts');
-      const choice = await postInstallChoice(prompts);
-      if (choice !== 'later') {
-        const guide = await installedGuidance({ target: options.target || '.', mode: choice });
-        process.stdout.write(`\n${guide.guidance}\n`);
-      }
+      const guide = await installedGuidance({ target: options.target || '.', mode: 'manual' });
+      process.stdout.write(`\n${guide.guidance}\n`);
     } catch {
-      // Guidance is optional; a terminal error cannot undo a successful install.
-      process.stdout.write('\nOptional setup guidance could not be shown.\n');
+      // Guidance is optional; a read error cannot undo a successful install.
+      process.stdout.write('\nOptional setup blueprint could not be shown.\n');
     }
     process.stdout.write(
-      '\nRevisit setup anytime: edge-commerce guide --mode manual (or --mode ai)\n',
+      '\nOptional copyable AI prompt: edge-commerce guide --mode ai (run from the storefront directory, or pass --target)\n',
     );
   }
 }
@@ -253,7 +279,7 @@ program
   .option('--target <directory>', 'EDS storefront directory (defaults to current directory)')
   .option('--dry-run', 'show changes and diffs without writing')
   .option('--no-input', 'never prompt')
-  .option('--yes', 'apply only files still matching installed hashes')
+  .option('--yes', 'apply unchanged installed files and safe managed PDP hooks')
   .option('--json', 'print one JSON result; disables prompts')
   .action((options) => runInit(options, 'upgrade'));
 program
@@ -272,8 +298,9 @@ program
   .option('--json', 'print one JSON result; disables prompts')
   .action(async (options) => {
     const plan = await planRemoval({ target: options.target, features: options.feature });
-    if (options.dryRun) {
+    if (plan.outcome === 'blocked' || options.dryRun) {
       output(plan, options.json);
+      if (plan.outcome === 'blocked') process.exitCode = 3;
       return;
     }
     const interactive = Boolean(process.stdin.isTTY && options.input !== false && !options.json);
@@ -285,7 +312,8 @@ program
     if (interactive && !options.yes) {
       const prompts = await import('@clack/prompts');
       const yes = await prompts.confirm({
-        message: 'Remove unchanged installed files? Edited files will be preserved.',
+        message:
+          'Remove unchanged installed files and managed PDP hooks? Other edits will be preserved.',
       });
       if (prompts.isCancel(yes) || !yes) throw new CliError('CANCELLED', 'Removal cancelled.');
     }

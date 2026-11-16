@@ -47,11 +47,35 @@ function publicDetails({ routes, currency }) {
   };
 }
 
+const pdpHooks =
+  'import { buildPDPBlock, loadPDPPreview } from "./commerce/pdp-page.js"; call buildPDPBlock(main) first in buildAutoBlocks and await loadPDPPreview() first in loadEager, before decorateMain';
+const pdpLocalDevelopment =
+  'Local development: run aem up with AEM_PAGES_URL (or --url) set to https://main--{repo}--{owner}.aem.network for product pages; authored pages need the .aem.page origin, and folder pages are served as {folder}/index.plain.html.';
+
+function pdpIntegrationNote(status) {
+  if (status === 'unchanged') {
+    return 'PDP hooks already installed in scripts/scripts.js. Do not add them again. Keep the edge-commerce:pdp marker regions unchanged; edit other storefront code normally.';
+  }
+  if (status === 'modified') {
+    return 'The managed PDP hooks in scripts/scripts.js were edited or cannot be verified. Review edge-commerce check and restore the managed regions or reconcile them manually before upgrade/removal.';
+  }
+  return `Manually integrate the PDP in scripts/scripts.js after checking for existing product detection and hooks: ${pdpHooks}. The automatic integration was skipped or predates this install; do not duplicate a custom PDP loader.`;
+}
+
+function pdpPreviewNote(preview) {
+  return preview
+    ? 'Branch previews (*.aem.page, *.aem.live) load product pages from https://main--{repo}--{owner}.aem.network through the CORS proxy configured in scripts/commerce/pdp-config.js. The proxy key is public and visible in browser code.'
+    : 'Branch previews (*.aem.page, *.aem.live) do not serve Product Pipeline pages. To preview product pages, set preview.proxyKey and preview.productPath in scripts/commerce/pdp-config.js (or rerun with pdp.previewProxyKey).';
+}
+
 /** Self-contained guidance tied to this CLI version; no model or merchant tokens. */
 export function integrationGuidance({
   features,
   routes,
   currency,
+  pdpMode = 'cart',
+  pdpPreview = false,
+  pdpIntegration,
   mode = 'manual',
   installedRelease = version,
 }) {
@@ -62,6 +86,7 @@ export function integrationGuidance({
   }
   const checkout = features.includes('cart-checkout');
   const pdp = features.includes('pdp');
+  const catalog = pdp && !checkout && pdpMode === 'catalog';
   const publicSetup = publicDetails({ routes, currency });
   const pages = checkout
     ? widgetRoutes.map(
@@ -82,19 +107,30 @@ export function integrationGuidance({
       ...(versionNotice ? [versionNotice] : []),
       ...(checkout
         ? [
-            'Confirm the site auto-blocks widget links; the CLI does not edit scripts/scripts.js or publish authored pages.',
-            'Author and publish a page containing a standalone link to each widget (use the storefront code origin):',
+            'Code already copied: see .edge-commerce/manifest.json for the complete list, including scripts/commerce/site-config.js, scripts/commerce/checkout-config.js and widgets/{name}/{name}.html, .css and .js. Do not recreate those files.',
+            'Storefront code to integrate (only where needed): existing PDP/PLP add-to-cart actions, header cart count and widget-link loader. Inspect the real files; the CLI does not rewrite them.',
+            'Authored page blueprint (content pages, not new repository code files):',
             ...pages,
+            'Each page needs one standalone paragraph containing a normal link to its matching widget asset on a verified code origin. Example: <p><a href="{verified-code-origin}/widgets/cart/cart.html">Cart</a></p>. Replace the placeholder after verification; never publish it as-is. Do not add a second heading; widget HTML supplies it. Inspect existing pages before creating any.',
+            'Discover the preview/code origin from the repository and branch and verify it; a reachable page does not mean its widget assets are synced. Check each route and asset read-only. Do not assume DA or request preview URLs; use temporary local fixtures for unpublished pages and report them as authoring tasks.',
           ]
         : []),
       ...(pdp
         ? [
-            'Author the PDP block, then validate its source-backed SKU, offer, availability and variant selection.',
+            'PDP code already copied: blocks/pdp/pdp.js and scripts/commerce/pdp-page.js, pdp-preview.js and pdp-config.js. The block reads the Product Pipeline page (Product JSON-LD plus the rendered heading and pictures); it does not fetch product JSON.',
+            pdpIntegrationNote(pdpIntegration),
+            pdpPreviewNote(pdpPreview),
+            pdpLocalDevelopment,
+            catalog
+              ? 'Catalog-only mode: the PDP shows no price, variant selector or cart, and the cart core is not installed.'
+              : 'Validate a real product page: source-backed SKU, an in-stock offer in the store currency and variant selection.',
           ]
         : [
             'Connect your existing PDP/PLP to scripts/commerce/product-to-cart.js; use jsonld-adapter.js if its Product/Offer JSON-LD matches.',
           ]),
-      `Only add offers priced in ${currencyHint}; do not relabel browser prices.`,
+      ...(catalog
+        ? []
+        : [`Only add offers priced in ${currencyHint}; do not relabel browser prices.`]),
       ...(checkout
         ? [
             'Connect the header cart UI to cart:change; customize storefront styles as needed.',
@@ -102,7 +138,7 @@ export function integrationGuidance({
             'Sandbox-test standard and Express checkout, review, cancel, pending and completed payment before live use.',
           ]
         : []),
-      'Run the storefront lint and tests; validate cart behavior in a browser. edge-commerce check only reports installed-file drift.',
+      `Run the storefront lint and tests; validate ${catalog ? 'product pages' : 'cart behavior'} in a browser. edge-commerce check only reports installed-file drift.`,
     ].join('\n');
   }
 
@@ -114,17 +150,30 @@ export function integrationGuidance({
     ...(checkout
       ? [
           'The cart, checkout, review, complete and cancel widgets are installed. Check that this site loads standalone widget links; do not silently replace its loader or publish pages.',
-          `These routes require authored pages with one corresponding widget link each; ask for the code origin if it is unknown:\n${pages.join('\n')}`,
+          'Discover the EDS preview/code origin yourself: inspect repository docs/config, the Git remote and current branch without echoing credentials from a remote URL. Derive https://{branch}--{repo}--{owner}.aem.page/ only as a candidate and verify it read-only. A missing widget asset on an otherwise reachable preview can mean the code has not been synced yet. Check whether the existing widget loader resolves assets via window.hlx.codeBasePath. If no preview can be verified, use the widget paths in local fixtures and report publishing as a separate task; do not ask me for an origin or invent a working URL.',
+          'Inspect the header for its configured nav metadata/path and fallback (commonly /nav); if reachable, inspect the resolved fragment read-only. Its DA/Drive authoring source may not exist in Git. Reuse an authored cart link when present; otherwise use the configured routes.cart as a root-relative fallback in the header code. Do not ask me where the nav source lives or edit/publish authored nav content.',
+          'Code files already copied by the CLI are recorded in .edge-commerce/manifest.json, including scripts/commerce/site-config.js, scripts/commerce/checkout-config.js and widgets/{name}/{name}.html, .css and .js. Do not recreate or overwrite them. Propose edits to existing PDP/PLP, header and widget-loader files only where the storefront requires integration; inspect their actual paths first.',
+          `Authored page blueprint (content pages, not new code files):\n${pages.join('\n')}`,
+          'For each route, the authored page should contain one standalone paragraph with a normal link to the corresponding widget asset on the verified code origin (for example, <p><a href="{verified-code-origin}/widgets/cart/cart.html">Cart</a></p>). Replace that placeholder after verification. Do not add a second h1; widget HTML already contains the heading. Inspect existing pages before recommending additions or changes.',
+          'Check the derived preview URL for each route and its widget asset read-only; inspect .plain.html when available. A page returning 200 does not prove its widget asset is synced. Do not assume pages are managed in DA or ask me whether they are, and do not ask me for preview URLs. If routes or assets are unavailable, use temporary local fixtures for browser checks, report unpublished or incomplete pages as separate authoring tasks, and do not create or publish authored content.',
         ]
       : []),
     ...(pdp
       ? [
-          'The optional PDP block is installed; connect it to real catalog data and require a selected source-backed variant when applicable.',
+          `The optional PDP block is installed. It reads the Product Pipeline page (Product JSON-LD plus the rendered heading and pictures) and never fetches product JSON. ${pdpIntegrationNote(pdpIntegration)}`,
+          `${pdpPreviewNote(pdpPreview)} ${pdpLocalDevelopment}`,
+          catalog
+            ? 'Catalog-only mode: the PDP shows no price, variant selector or cart. Do not add cart code.'
+            : 'Require a selected, source-backed, in-stock variant before Add to Cart.',
         ]
       : [
           'Connect the existing PDP/PLP add-to-cart action using scripts/commerce/product-to-cart.js; use jsonld-adapter.js only if its schema applies.',
         ]),
-    `The cart currency is ${currencyHint}. Reject missing/mismatched offer currencies and unavailable products; never manufacture a price or copy large custom product data into the cart.`,
+    ...(catalog
+      ? []
+      : [
+          `The cart currency is ${currencyHint}. Reject missing/mismatched offer currencies and unavailable products; never manufacture a price or copy large custom product data into the cart.`,
+        ]),
     ...(checkout
       ? [
           'Integrate the existing header cart control using cart:change. Preserve the cart until the API verifies payment_completed; PayPal approval alone is not success.',
@@ -132,7 +181,7 @@ export function integrationGuidance({
           'Report as separate merchant tasks: authored page publishing, Commerce API/PayPal server settings, shipping, CORS, any required reCAPTCHA, and both PayPal sandbox journeys. Do not access or expose secrets.',
         ]
       : [
-          'After approval, implement in the customer-owned files only. Run storefront lint/tests and validate a real product, variant and cart behavior in a browser.',
+          `After approval, implement in the customer-owned files only. Run storefront lint/tests and validate a real product page${catalog ? '' : ', variant and cart behavior'} in a browser.`,
         ]),
     'Show the diff and any skipped validation. Do not commit, push, publish pages, configure live payment or claim production readiness without explicit approval.',
   ].join('\n\n');
@@ -144,6 +193,9 @@ export async function installedGuidance({ target, mode = 'manual' }) {
   const checkout = installation.features.includes('cart-checkout')
     ? await publicConfig(target, 'scripts/commerce/checkout-config.js')
     : null;
+  const pdp = installation.features.includes('pdp')
+    ? await publicConfig(target, 'scripts/commerce/pdp-config.js')
+    : null;
   return {
     version: 1,
     outcome: 'ready',
@@ -153,21 +205,13 @@ export async function installedGuidance({ target, mode = 'manual' }) {
       features: installation.features,
       routes: checkout?.routes,
       currency: site?.currency,
+      pdpMode: pdp?.mode === 'catalog' ? 'catalog' : 'cart',
+      pdpPreview: typeof pdp?.preview?.proxyKey === 'string' && Boolean(pdp.preview.proxyKey),
+      pdpIntegration: installation.operations.find(
+        (op) => op.path === 'scripts/scripts.js' && op.kind === 'integration',
+      )?.action,
       mode,
       installedRelease: installation.release,
     }),
   };
-}
-
-export async function postInstallChoice(prompts) {
-  const choice = await prompts.select({
-    message: 'How will you connect commerce to this storefront?',
-    options: [
-      { label: 'Manual setup checklist', value: 'manual' },
-      { label: 'AI prompt (copy into your coding agent)', value: 'ai' },
-      { label: 'Later', value: 'later' },
-    ],
-  });
-  // Installation has already succeeded: cancelling guidance must not report a failed install.
-  return prompts.isCancel(choice) ? 'later' : choice;
 }

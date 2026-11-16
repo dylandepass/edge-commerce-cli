@@ -4,7 +4,7 @@ The CLI copies five self-contained EDS widgets into `widgets/`: `cart`, `checkou
 
 ## Author the pages
 
-Your storefront must support [AEM widgets](https://www.aem.live/docs/widgets): a standalone widget URL in an authored paragraph is auto-blocked, then its `.html`, `.css`, and `.js` are loaded. If your site does not already have a widget loader and link auto-blocking, integrate those before publishing these pages; copying the files alone does not edit `scripts/scripts.js` or make URLs into widgets. Verify `/widgets/cart/cart.html` resolves from your code origin. For example, author a **single link** on the cart page:
+Your storefront must support [AEM widgets](https://www.aem.live/docs/widgets): a standalone widget URL in an authored paragraph is auto-blocked, then its `.html`, `.css`, and `.js` are loaded. If your site does not already have a widget loader and link auto-blocking, integrate those before publishing these pages; copying the checkout files alone does not add widget loading to `scripts/scripts.js` or make URLs into widgets. Verify `/widgets/cart/cart.html` resolves from your code origin. For example, author a **single link** on the cart page:
 
 ```text
 https://main--your-repo--your-org.aem.page/widgets/cart/cart.html
@@ -20,7 +20,7 @@ Author and publish one page for each route in `scripts/commerce/checkout-config.
 | `routes.complete` | `/widgets/order-complete/order-complete.html` |
 | `routes.cancel` | `/widgets/order-cancel/order-cancel.html` |
 
-Use your storefront's code origin/branch in the authored URLs. Keep each widget link alone in its paragraph so the site's widget auto-blocking recognizes it. Widget HTML already contains the page heading; avoid authoring a second heading or legacy Cart/Cart Summary block on the same page. Existing authored pages must be changed manually; the CLI does not publish or rewrite content. Link your existing PDP to `addProductToCart`.
+These five routes are authored **content pages**, not additional code files. The CLI already copied each widget's `.html`, `.css`, and `.js` files, plus the commerce scripts listed in `.edge-commerce/manifest.json`. Inspect any existing route before proposing a new page. In rendered HTML, each page needs a standalone paragraph with one ordinary link to its matching widget, for example `<p><a href="https://main--your-repo--your-org.aem.page/widgets/cart/cart.html">Cart</a></p>`. Use a verified code origin/branch in the authored link. The widget HTML supplies the page heading, so remove any duplicate authored heading or legacy Cart/Cart Summary block. The CLI does not assume Document Authoring (DA) is the site's content source and does not publish or rewrite pages. If a route or widget asset is unavailable on preview, use temporary local fixtures for code validation and list publication as a separate task. Link your existing PDP to `addProductToCart`.
 
 The default cart and checkout use responsive product, form, and order-summary cards. The checkout summary shows the cart subtotal until the Commerce API returns a previewed total; it does not estimate tax or shipping in the browser. To match your storefront, optionally load `styles/commerce-tokens.css` from your global stylesheet and override `--commerce-color-primary`, `--commerce-color-border`, `--commerce-radius-card`, `--commerce-summary-width`, and other `--commerce-*` properties. The widgets also have standalone CSS fallbacks when that stylesheet is not loaded.
 

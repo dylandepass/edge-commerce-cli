@@ -63,7 +63,8 @@ test('CLI is scriptable: dry run writes nothing, apply/check output one JSON obj
   const manual = execFileSync(process.execPath, [bin, 'guide', '--target', target], {
     encoding: 'utf8',
   });
-  assert.match(manual, /Author and publish a page/);
+  assert.match(manual, /Authored page blueprint/);
+  assert.match(manual, /Code already copied/);
   assert.deepEqual(await readFile(path.join(target, '.edge-commerce/manifest.json')), manifest);
   assert.equal(run('check', '--target', target, '--json').json.outcome, 'ready');
   const repeat = run('init', '--target', target, '--config', config, '--yes', '--json');
@@ -182,4 +183,45 @@ test('copied JS relative imports resolve within each installed profile', async (
     }
   }
   assert.match(execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' }), /init/);
+});
+
+test('CLI previews, applies and removes managed PDP hooks and rejects edited-hook removal', async () => {
+  const target = await mkdtemp(path.join(tmpdir(), 'edge-cli-hooks-'));
+  await mkdir(path.join(target, 'scripts'));
+  const script = path.join(target, 'scripts/scripts.js');
+  const original = 'function buildAutoBlocks(main) {}\nasync function loadEager(doc) {}\n';
+  await writeFile(script, original);
+  const pdpConfig = path.join(root, 'examples/pdp-catalog-setup.json');
+  const args = ['init', '--target', target, '--config', pdpConfig, '--no-input'];
+  const dry = run(...args, '--dry-run', '--json');
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(
+    dry.json.operations.find((op) => op.path === 'scripts/scripts.js')?.action,
+    'update',
+  );
+  assert.equal(await readFile(script, 'utf8'), original);
+  const unapproved = run(...args, '--json');
+  assert.equal(unapproved.status, 2);
+  assert.equal(await readFile(script, 'utf8'), original);
+  assert.equal(run(...args, '--yes', '--json').status, 0);
+  const installed = await readFile(script, 'utf8');
+  assert.notEqual(installed, original);
+  const guide = run('guide', '--target', target, '--json');
+  assert.match(guide.json.guidance, /PDP hooks already installed/);
+  assert.doesNotMatch(guide.json.guidance, /Manually integrate/);
+  await writeFile(script, installed.replace('await loadPDPPreview();', 'loadPDPPreview();'));
+  const removeArgs = ['remove', '--target', target, '--feature', 'pdp'];
+  const blocked = run(...removeArgs, '--dry-run', '--json');
+  assert.equal(blocked.status, 3);
+  assert.equal(blocked.json.outcome, 'blocked');
+  assert.equal(run(...removeArgs, '--yes', '--json').status, 3);
+  await access(path.join(target, 'scripts/commerce/pdp-page.js'));
+  await writeFile(script, installed);
+  const preview = run(...removeArgs, '--dry-run', '--json');
+  assert.match(
+    preview.json.operations.find((op) => op.path === 'scripts/scripts.js').diff,
+    /-.*loadPDPPreview/,
+  );
+  assert.equal(run(...removeArgs, '--yes', '--json').status, 0);
+  assert.equal(await readFile(script, 'utf8'), original);
 });
