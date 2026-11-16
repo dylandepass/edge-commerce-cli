@@ -1,41 +1,88 @@
 # Edge Commerce CLI
 
-Copies customer-owned EDS cart/checkout widgets and optional PDP block source into an existing storefront. Node 20+ runs the installer; copied browser modules use no npm runtime dependency. This is an initial sandbox-oriented starter. PayPal v6 compatibility, country/address coverage, and server setup need merchant validation before production use.
+Add cart, checkout and product detail pages to an existing [Adobe AEM Edge Delivery Services](https://www.aem.live/) storefront. The CLI copies source files into your project so you can customize them without a storefront runtime dependency on this package.
 
-## Local use
+**Preview software:** this starter is not production-validated. Before going live, verify your merchant's Commerce API configuration, address and country support, and both PayPal checkout flows in the sandbox.
 
-```sh
-npm install
-node bin/edge-commerce.mjs init --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --dry-run --json
-node bin/edge-commerce.mjs init --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --yes --json
-node bin/edge-commerce.mjs check --target /path/to/eds-storefront --json
-node bin/edge-commerce.mjs guide --target /path/to/eds-storefront --mode ai
-node bin/edge-commerce.mjs init --feature pdp --target /path/to/eds-storefront --config examples/pdp-setup.json --no-input --dry-run --json
-node bin/edge-commerce.mjs init --feature pdp --target /path/to/eds-storefront --config examples/pdp-catalog-setup.json --no-input --dry-run --json
-node bin/edge-commerce.mjs upgrade --target /path/to/eds-storefront --config examples/commerce-setup.json --no-input --dry-run --json
-node bin/edge-commerce.mjs remove --feature cart-checkout --target /path/to/eds-storefront --no-input --dry-run --json
-```
+## Requirements
 
-Omit `--config` on a TTY for the wizard. `init` defaults to cart/checkout; `--feature pdp` installs the PDP plus cart core without checkout; choose **Catalog only** in the wizard (or `"pdp": { "mode": "catalog" }`) for a PDP with no prices or cart, which skips the cart core. The PDP reads the Product Pipeline page (Product JSON-LD and rendered pictures) and inserts two hooks into supported `scripts/scripts.js` loaders, with a dry-run diff and manual fallback for custom or already integrated loaders; see the [product page guide](docs/commerce/pdp.md). Repeat `--feature` for both (and list both in your config). `upgrade` shows per-file diffs and requires `--yes` to apply only when installed files still match their recorded hashes. `remove` removes unchanged files for the chosen profile; edited files stay with the customer. Conflicts block the entire install, including generated configuration. No `postinstall` mutates the storefront. See the CLI's [checkout setup guide](docs/commerce/checkout-setup.md) for widget links, page authoring, and integration steps. Guides stay in the CLI package; they are not copied into storefronts. The storefront must support AEM widget links; the CLI does not add widget loading or publish pages. The managed PDP regions in `scripts.js` are tracked separately from customer code and removed with the PDP feature. Edited or moved managed hooks block upgrade/removal until reviewed. The CLI never accepts PayPal server secrets.
+- Node.js 20.12 or later, with npm.
+- An existing Edge Delivery Services storefront.
+- For checkout, a configured Commerce API site and a public PayPal client ID. See [checkout setup](docs/commerce/checkout-setup.md) for server prerequisites.
 
-## After installation
+## Quick start
 
-On an interactive terminal, a successful new install prints an authored-page and installed-file blueprint, followed by the command for an optional copyable AI prompt. There is no post-install choice. Revisit the blueprint with `edge-commerce guide --target /path/to/eds-storefront --mode manual`, or print the prompt with `--mode ai`; `--json` produces one machine-readable result. The CLI's [checkout setup guide](docs/commerce/checkout-setup.md) remains available without AI. Guidance uses only public, allowlisted routes and currency; it never runs an AI model, reads `.env` files, imports customer JavaScript, edits customer files, or collects model/merchant tokens. Use your own coding agent and tokens only if you choose the optional prompt. Dry runs, upgrades, `--no-input`, and `--json` installs do not print a post-install blueprint (interactive setup questions may still appear before a dry run). Authored-page publishing and merchant sandbox validation remain separate.
-
-Cart lines require an explicit price currency matching the configured checkout currency; other-currency and currency-less offers are rejected rather than relabeled. Existing PDPs backed by Product/Offer JSON-LD can opt into the copied `scripts/commerce/jsonld-adapter.js` to map a selected Offer without copying heavy product metadata. See the CLI's [storefront setup guide](docs/commerce/setup.md) for usage.
-
-The cart storage namespace (`site.storeView`) defaults to `default`; it is not a required Commerce API store view. The shopper locale (`site.locale`) defaults to `en-US` for US English. The wizard shows both defaults; change the locale for other markets. JSON setup may omit these fields or leave them blank, but currency and checkout country still need values. For checkout, the API origin is selected in the browser: `*.aem.page`, `*.aem.live`, and localhost use `https://api-stage.adobecommerce.live`; custom domains use `https://api.adobecommerce.live`. Provide `api.org` and `api.site`; set a public `api.origin` in JSON only when a custom staging domain or proxy needs an override. PayPal sandbox/live settings are separate from API routing.
-
-`npm run format` formats JS and CSS; `npm run lint` checks syntax and Prettier formatting. `npm test` runs unit and fixture tests; `npm run verify:package` checks and installs the npm tarball in a disposable directory. No live checkout or browser acceptance tests are included yet.
-
-## Distribution
-
-The published `0.1.0` preview can be run without a storefront runtime dependency:
+From your storefront directory, preview an installation and then run the wizard to apply it:
 
 ```sh
 cd /path/to/eds-storefront
-npx --yes edge-commerce-cli@0.1.0 init --dry-run
-npx --yes edge-commerce-cli@0.1.0 init
+npx --yes edge-commerce-cli@preview init --dry-run
+npx --yes edge-commerce-cli@preview init
 ```
 
-This is not production-validated checkout code. npm currently points `latest` at the bootstrap version, so always specify a version or `@preview`; do not use an unversioned install. Reviewed `fix:` and `feat:` commits merged to `main` can trigger automatic preview releases after validation; docs-only and `chore:` commits normally do not. See [the release procedure](docs/releasing.md) for the release rules and sandbox requirements.
+The wizard lets you choose cart and checkout, PDP only, or both, and shows the file plan before asking for confirmation. PDP-only installs offer **Sell online** or **Catalog only**, which omits prices and cart controls.
+
+Use `@preview` or pin a published version. The npm `latest` tag still points to the bootstrap package, so an unversioned install does not select the current preview. See [releases](https://github.com/dylandepass/edge-commerce-cli/releases) for published versions.
+
+## Configure an installation
+
+For repeatable or non-interactive setup, copy an example, replace its placeholders, and save it as `commerce-setup.json`:
+
+| Example | Installs |
+| --- | --- |
+| [Cart and checkout](examples/commerce-setup.json) | Cart and checkout widgets for an existing product page |
+| [PDP with cart](examples/pdp-setup.json) | Product Pipeline PDP with prices and Add to cart, without checkout |
+| [Catalog-only PDP](examples/pdp-catalog-setup.json) | Product Pipeline PDP without prices or cart |
+
+To install both features, set `features` to `["cart-checkout", "pdp"]` and include the checkout settings. Setup files contain public configuration only. Never put PayPal server secrets in them. The optional PDP preview proxy key is also public in browser code.
+
+```sh
+npx --yes edge-commerce-cli@preview init --config ./commerce-setup.json --no-input --dry-run --json
+npx --yes edge-commerce-cli@preview init --config ./commerce-setup.json --no-input --yes --json
+```
+
+`--dry-run` writes nothing. Applying without an interactive terminal requires `--yes`; `--json` returns one machine-readable result and disables prompts. Use `--target /path/to/eds-storefront` to operate on a different directory.
+
+## Complete the storefront setup
+
+Installing source files does not publish content pages or configure backend services. Review the integration checklist after installation:
+
+```sh
+npx --yes edge-commerce-cli@preview guide --mode manual
+```
+
+- **Cart and checkout:** connect existing product pages and the header cart UI, ensure the site supports widget links, and author the checkout pages. Follow [checkout setup](docs/commerce/checkout-setup.md).
+- **PDP:** supported page loaders receive the required hooks in `scripts/scripts.js`. Custom or already integrated loaders need manual review. Follow the [product page guide](docs/commerce/pdp.md) for modes, preview configuration and local development.
+
+If you use a coding agent, `guide --mode ai` prints an optional prompt to copy into it. The CLI does not run an AI model or require model credentials.
+
+## Manage an installation
+
+Use `npx --yes edge-commerce-cli@preview <command>` from your storefront directory:
+
+| Command | Purpose |
+| --- | --- |
+| `init` | Preview or install selected features |
+| `guide --mode manual` | Show the storefront integration checklist |
+| `check` | Report missing or edited installed files and managed PDP hooks |
+| `upgrade --config ./commerce-setup.json --dry-run` | Preview updates using your setup file |
+| `remove --feature pdp --dry-run` | Preview removal of a feature; use `cart-checkout` to remove checkout instead |
+
+After reviewing an upgrade or removal plan, rerun it without `--dry-run` and confirm, or pass `--yes`. Run `npx --yes edge-commerce-cli@preview --help` for all commands and flags.
+
+Conflicts block the entire installation. Upgrades preserve customer-edited files for manual merging, and removal keeps edited files. PDP hooks are managed separately from the rest of `scripts.js`: unrelated edits are preserved, while changed or moved managed hooks block upgrade and removal until reviewed.
+
+## Documentation
+
+- [Storefront integration](docs/commerce/setup.md): configuration defaults, product-to-cart mapping and currency handling.
+- [Checkout setup](docs/commerce/checkout-setup.md): widget pages, API routing, PayPal and launch requirements.
+- [Product pages](docs/commerce/pdp.md): JSON-LD rendering, catalog mode and branch previews.
+- [Architecture](docs/commerce/architecture.md): cart state and payment flows.
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for development commands and repository guidelines, and [the release guide](docs/releasing.md) for publishing. Report bugs and request features in [GitHub Issues](https://github.com/dylandepass/edge-commerce-cli/issues).
+
+## License
+
+[Apache License 2.0](LICENSE).
